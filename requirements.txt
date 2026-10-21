@@ -1,0 +1,6 @@
+# TraceByte / FileCarveLab - Stage 1 runtime dependencies
+# Install with:  python -m pip install -r requirements.txt
+
+streamlit>=1.40
+pandas>=2.0
+pytest>=8.0

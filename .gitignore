@@ -1,0 +1,59 @@
+# ---------------------------------------------------------------------------
+# TraceByte / FileCarveLab - Digital Forensics PBL (DF-PBL-016)
+# ---------------------------------------------------------------------------
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+
+# Virtual environments (Windows)
+.venv/
+venv/
+env/
+ENV/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editor / OS noise
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Secrets (never commit evidence credentials)
+.env
+*.pem
+*.key
+
+# --- Forensic data directories -------------------------------------------
+# data/originals/ is INTENTIONALLY TRACKED IN GIT.
+# It holds the ground-truth synthetic fixtures and manifest.json, which is the
+# baseline evidence record. Tracking it means a reviewer can independently
+# re-verify the baseline hashes against the committed files.
+#
+# The other three directories hold regenerable or experiment-derived data and
+# are therefore ignored.
+
+data/experiments/*
+!data/experiments/.gitkeep
+
+data/recovered/*
+!data/recovered/.gitkeep
+
+logs/*.jsonl
+!logs/.gitkeep
+
+reports/*.md
+reports/*.csv
+reports/*.json
+!reports/.gitkeep
