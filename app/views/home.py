@@ -59,10 +59,10 @@ with st.container(border=True):
         "| 1 | Project scaffold, synthetic dataset, SHA-256 manifest, integrity "
         "screen, test suite | Complete |\n"
         "| 2 | Signature scanner and carving engine over the three storage "
-        "conditions | Not started |\n"
+        "conditions | Complete |\n"
         "| 3 | Recovery pipeline, content validation and ground-truth matching | "
-        "Not started |\n"
-        "| 4 | Precision / recall measurement and results dashboard | Not started |\n"
+        "Complete |\n"
+        "| 4 | Precision / recall measurement and results dashboard | Complete |\n"
         "| 5 | Failure analysis, limitations and final report | Not started |"
     )
 

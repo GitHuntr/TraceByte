@@ -120,3 +120,44 @@ def test_experiment_log_page_renders(isolated_paths: Path) -> None:
     app.run()
     assert not app.exception
 
+
+def test_carve_page_renders_and_lists_the_signatures(isolated_paths: Path) -> None:
+    app = _app()
+    app.run()
+    app.switch_page("app/views/carve.py")
+    app.run()
+    assert not app.exception
+    assert any("Supported signatures" in block.value for block in app.markdown)
+
+
+def test_carve_page_runs_the_experiments(isolated_paths: Path) -> None:
+    app = _app()
+    app.run()
+    app.switch_page("app/views/dataset.py")
+    app.run()
+    _button(app, "Initialise dataset").click().run()
+
+    app.switch_page("app/views/carve.py")
+    app.run()
+    _button(app, "Run carving experiments").click().run()
+    assert not app.exception
+    assert any("Ran 3 experiments" in message.value for message in app.success)
+
+
+def test_results_page_reports_the_measurements(isolated_paths: Path) -> None:
+    app = _app()
+    app.run()
+    app.switch_page("app/views/dataset.py")
+    app.run()
+    _button(app, "Initialise dataset").click().run()
+
+    app.switch_page("app/views/carve.py")
+    app.run()
+    _button(app, "Run carving experiments").click().run()
+
+    app.switch_page("app/views/results.py")
+    app.run()
+    assert not app.exception
+    assert len(app.metric) > 0
+    assert any("contiguous" in block.value for block in app.subheader)
+

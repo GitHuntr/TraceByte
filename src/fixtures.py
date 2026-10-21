@@ -64,6 +64,21 @@ def expand_seed(seed: str, length: int) -> bytes:
     return bytes(output[:length])
 
 
+def expand_seed_avoiding(seed: str, length: int, avoid: bytes) -> bytes:
+    """Return deterministic bytes that do not contain *avoid* anywhere.
+
+    Used for the length-bearing fixtures: a payload must not contain the
+    format's own end marker, otherwise the carved extent would end early and
+    the measurement would depend on chance rather than on design.
+    """
+    counter = 0
+    while True:
+        data = expand_seed(f"{seed}/{counter}", length)
+        if avoid not in data:
+            return data
+        counter += 1
+
+
 @dataclass(frozen=True)
 class FixtureSpec:
     """Declarative description of one synthetic fixture."""
@@ -118,6 +133,56 @@ def _build_container() -> bytes:
     )
     tail = expand_seed(f"{SEED_NAMESPACE}/synthetic_container_01/tail", 1024)
     return head + embedded + tail
+
+
+def _build_len_jpeg() -> bytes:
+    """JPEG-like fixture that carries its own end-of-image marker."""
+    payload = expand_seed_avoiding(
+        f"{SEED_NAMESPACE}/synthetic_len_photo_01/payload", 1024, b"\xff\xd9"
+    )
+    sof0 = (
+        b"\xff\xc0\x00\x11\x08\x00\x10\x00\x10"
+        b"\x03\x01\x22\x00\x02\x11\x01\x03\x11\x01"
+    )
+    return (
+        JPEG_APP0_HEADER
+        + b"SYNTHETIC-FIXTURE:synthetic_len_photo_01 (FileCarveLab) - "
+        b"NOT A VALID JPEG - carries an FF D9 end marker so a carving engine "
+        b"can delimit the extent\n"
+        + sof0
+        + payload
+        + b"\xff\xd9"
+    )
+
+
+def _build_len_pdf() -> bytes:
+    """PDF-like fixture that carries its own end-of-file trailer."""
+    payload = expand_seed_avoiding(
+        f"{SEED_NAMESPACE}/synthetic_len_doc_01/payload", 1024, b"%%EOF"
+    )
+    return (
+        PDF_HEADER
+        + b"% SYNTHETIC-FIXTURE:synthetic_len_doc_01 (FileCarveLab) - "
+        b"NOT A VALID PDF - carries an end-of-file trailer so a carving engine "
+        b"can delimit the extent\n"
+        + payload
+        + b"\n%%EOF"
+    )
+
+
+def _build_len_zip() -> bytes:
+    """ZIP-like fixture that carries its own end-of-central-directory record."""
+    payload = expand_seed_avoiding(
+        f"{SEED_NAMESPACE}/synthetic_len_archive_01/payload", 1024, b"PK\x05\x06"
+    )
+    return (
+        ZIP_LOCAL_HEADER
+        + b"SYNTHETIC-FIXTURE:synthetic_len_archive_01 (FileCarveLab) - "
+        b"NOT A VALID ZIP - carries an end-of-central-directory record "
+        b"so a carving engine can delimit the extent\n"
+        + payload
+        + b"PK\x05\x06"
+    )
 
 
 FIXTURE_SPECS: tuple[FixtureSpec, ...] = (
@@ -190,6 +255,53 @@ FIXTURE_SPECS: tuple[FixtureSpec, ...] = (
         signature_offset=1024,
         notes="Planned ground truth for fragmented carving.",
         _builder=_build_container,
+    ),
+    FixtureSpec(
+        fixture_id="fx-len-photo-01",
+        filename="synthetic_len_photo_01.jpg",
+        description=(
+            "Synthetic JPEG-signature fixture with a self-delimiting end marker "
+            "(FF D9). It starts with a JPEG SOI/APP0 header and a SOF0 segment, "
+            "but there are no Huffman or quantisation tables and no entropy-coded "
+            "scan, so it is NOT a valid, fully parseable JPEG file. The end marker "
+            "exists so that a carving engine can determine the extent of the "
+            "candidate and a byte-exact recovery is measurable at all."
+        ),
+        signature_hex=JPEG_APP0_HEADER[:4].hex(),
+        signature_offset=0,
+        notes="Length-bearing ground truth: allows extent delimitation.",
+        _builder=_build_len_jpeg,
+    ),
+    FixtureSpec(
+        fixture_id="fx-len-doc-01",
+        filename="synthetic_len_doc_01.pdf",
+        description=(
+            "Synthetic PDF-signature fixture with a self-delimiting %%EOF "
+            "trailer. It starts with the '%PDF-' header, but it has no xref "
+            "table, no trailer dictionary and no object structure, so it is NOT "
+            "a valid, fully parseable PDF file. The trailer exists so that a "
+            "carving engine can determine the extent of the candidate."
+        ),
+        signature_hex=PDF_HEADER.strip().hex(),
+        signature_offset=0,
+        notes="Length-bearing ground truth: allows extent delimitation.",
+        _builder=_build_len_pdf,
+    ),
+    FixtureSpec(
+        fixture_id="fx-len-archive-01",
+        filename="synthetic_len_archive_01.zip",
+        description=(
+            "Synthetic ZIP-signature fixture with a self-delimiting "
+            "end-of-central-directory record (PK 05 06). It starts with a ZIP "
+            "local file header, but there is no real central directory and no "
+            "real archive structure, so it is NOT a valid archive. The record "
+            "exists so that a carving engine can determine the extent of the "
+            "candidate."
+        ),
+        signature_hex=ZIP_LOCAL_HEADER[:4].hex(),
+        signature_offset=0,
+        notes="Length-bearing ground truth: allows extent delimitation.",
+        _builder=_build_len_zip,
     ),
 )
 
@@ -277,7 +389,7 @@ class DatasetInitReport:
         return sum(1 for action in self.actions if action.status == "new")
 
 
-def _write_file_atomically(target: Path, data: bytes) -> None:
+def write_bytes_atomically(target: Path, data: bytes) -> None:
     """Write *data* to *target* without ever truncating an existing original."""
     target.parent.mkdir(parents=True, exist_ok=True)
     handle = tempfile.NamedTemporaryFile(
@@ -336,7 +448,7 @@ def initialize_dataset(
 
         if not target.exists():
             data = spec.build()
-            _write_file_atomically(target, data)
+            write_bytes_atomically(target, data)
             current_sha = sha256_file(target)
             entry = FixtureEntry(
                 fixture_id=spec.fixture_id,
@@ -456,7 +568,7 @@ def initialize_dataset(
         notes_path = originals_dir / FIXTURE_NOTES_FILENAME
         notes_text = fixture_notes_markdown()
         if not notes_path.exists() or notes_path.read_text(encoding="utf-8") != notes_text:
-            _write_file_atomically(notes_path, notes_text.encode("utf-8"))
+            write_bytes_atomically(notes_path, notes_text.encode("utf-8"))
 
     manifest.updated_utc = now
     manifest.tool_versions = tool_versions()

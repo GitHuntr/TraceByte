@@ -13,7 +13,7 @@ APP_ICON = ":material/fingerprint:"
 PROJECT_NAME = "TraceByte"
 PROJECT_REFERENCE = "Digital Forensics PBL | DF-PBL-016"
 TAGLINE = "File signature carving evaluation"
-STAGE_LABEL = "Stage 1 | Foundation and evidence integrity"
+STAGE_LABEL = "Stage 2 | Signature carving engine and measurement"
 PAGE_TITLE = f"{APP_NAME} | {PROJECT_NAME}"
 
 DISCLAIMER = (

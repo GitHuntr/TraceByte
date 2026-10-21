@@ -65,13 +65,19 @@ class ExperimentLog:
         self._versions = tool_versions()
 
     # -- writing ---------------------------------------------------------
-    def append(self, event: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    def append(
+        self,
+        event: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        actor: str = "filecarvelab.stage1",
+    ) -> dict[str, Any]:
         """Append one event record and return the written record."""
         record: dict[str, Any] = {
             "timestamp_utc": utc_now_iso(),
             "run_id": self.run_id,
             "event": event,
-            "actor": "filecarvelab.stage1",
+            "actor": actor,
             "tool_versions": self._versions,
             "payload": payload or {},
         }

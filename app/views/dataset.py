@@ -116,7 +116,7 @@ with st.container(border=True):
                     "Size (bytes)": entry.size_bytes,
                     "SHA-256": entry.sha256,
                     "Signature": entry.signature_hex.upper() or "none",
-                    "Offset": entry.signature_offset if entry.signature_offset is not None else "n/a",
+                    "Offset": str(entry.signature_offset) if entry.signature_offset is not None else "n/a",
                     "Fully parseable": entry.fully_parseable,
                     "Baseline origin": entry.baseline_origin,
                 }
@@ -146,7 +146,7 @@ with st.container(border=True):
                 "Fixture": spec.filename,
                 "Bytes": len(spec.build()),
                 "Signature": spec.signature_hex.upper() or "none",
-                "Offset": spec.signature_offset if spec.signature_offset is not None else "n/a",
+                "Offset": str(spec.signature_offset) if spec.signature_offset is not None else "n/a",
                 "Description": spec.description,
             }
             for spec in FIXTURE_SPECS

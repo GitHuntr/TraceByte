@@ -11,6 +11,9 @@ Files that start with a real file signature (JPEG / PDF / ZIP) are **not** valid
 | `synthetic_archive_01.zip` | 1667 | `504B0304` | 0 | No | Used later as a third contiguous ground truth. |
 | `synthetic_blob_01.bin` | 4096 | `none` | n/a | No | Negative control for false-positive measurements. |
 | `synthetic_container_01.bin` | 3142 | `FFD8FFE0` | 1024 | No | Planned ground truth for fragmented carving. |
+| `synthetic_len_photo_01.jpg` | 1213 | `FFD8FFE0` | 0 | No | Length-bearing ground truth: allows extent delimitation. |
+| `synthetic_len_doc_01.pdf` | 1189 | `255044462D312E34` | 0 | No | Length-bearing ground truth: allows extent delimitation. |
+| `synthetic_len_archive_01.zip` | 1202 | `504B0304` | 0 | No | Length-bearing ground truth: allows extent delimitation. |
 
 The authoritative baseline (size + SHA-256) lives in `manifest.json`.
 Verify it with the **Integrity** screen of the FileCarveLab dashboard.

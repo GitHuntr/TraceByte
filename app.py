@@ -55,6 +55,18 @@ def main() -> None:
                     icon=":material/fact_check:",
                 ),
             ],
+            "Carving": [
+                st.Page(
+                    "app/views/carve.py",
+                    title="Carve",
+                    icon=":material/content_cut:",
+                ),
+                st.Page(
+                    "app/views/results.py",
+                    title="Results",
+                    icon=":material/query_stats:",
+                ),
+            ],
             "Provenance": [
                 st.Page(
                     "app/views/log.py",
