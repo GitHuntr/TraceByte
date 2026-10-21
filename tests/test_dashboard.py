@@ -97,3 +97,26 @@ def test_integrity_page_detects_a_modified_copy(isolated_paths: Path) -> None:
     app.run()
     assert not app.exception
     assert any("content changed" in message.value for message in app.error)
+
+
+def test_overview_page_renders_metrics(isolated_paths: Path) -> None:
+    """The Overview page (home.py) must render without exception and
+    produce metric widgets and markdown content.
+    """
+    app = _app()
+    app.run()
+    app.switch_page("app/views/home.py")
+    app.run()
+    assert not app.exception
+    assert len(app.metric) > 0
+    assert len(app.markdown) > 0
+
+
+def test_experiment_log_page_renders(isolated_paths: Path) -> None:
+    """The Experiment log page (log.py) must render without exception."""
+    app = _app()
+    app.run()
+    app.switch_page("app/views/log.py")
+    app.run()
+    assert not app.exception
+

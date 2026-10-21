@@ -19,4 +19,5 @@ pythonpath = ["."]
 addopts = "-ra --strict-markers"
 markers = [
     "slow: marks tests as slow",
+    "integration: read-only checks against the committed baseline evidence set",
 ]

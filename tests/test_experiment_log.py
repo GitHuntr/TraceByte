@@ -69,3 +69,47 @@ def test_tool_versions_and_timestamp_helpers() -> None:
     assert versions["python"]
     assert "filecarvelab" in versions
     assert utc_now_iso().endswith("Z")
+
+
+def test_event_count_matches_read_events_length(workspace: Workspace) -> None:
+    """event_count() must always return the same value as
+    len(read_events()) for the same log file.
+    """
+    log = ExperimentLog(workspace.log_path)
+    assert log.event_count() == 0
+    assert log.event_count() == len(log.read_events())
+
+    log.append("first", {"n": 1})
+    log.append("second", {"n": 2})
+    log.append("third", {"n": 3})
+
+    assert log.event_count() == 3
+    assert log.event_count() == len(log.read_events())
+
+
+def test_disabled_log_writes_no_file_but_returns_record(
+    workspace: Workspace,
+) -> None:
+    """ExperimentLog(enabled=False) must not create or write to the log
+    file, but append() must still return a well-formed record dict.
+    """
+    log = ExperimentLog(workspace.log_path, enabled=False)
+    record = log.append("silent_event", {"key": "value"})
+
+    assert not workspace.log_path.exists()
+    assert record["event"] == "silent_event"
+    assert record["payload"] == {"key": "value"}
+    assert record["timestamp_utc"].endswith("Z")
+    assert record["run_id"]
+
+
+def test_default_log_points_at_experiment_log_path() -> None:
+    """default_log() must return an ExperimentLog whose path matches the
+    canonical EXPERIMENT_LOG_PATH defined in src.paths.
+    """
+    from src.experiment_log import default_log
+    from src.paths import EXPERIMENT_LOG_PATH
+
+    log = default_log()
+    assert log.path == EXPERIMENT_LOG_PATH
+

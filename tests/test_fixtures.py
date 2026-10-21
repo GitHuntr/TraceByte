@@ -172,3 +172,66 @@ def test_dataset_notes_are_written_next_to_the_fixtures(workspace: Workspace) ->
     text = notes.read_text(encoding="utf-8")
     assert "synthetic" in text.lower()
     assert "not" in text.lower()
+
+
+def test_dataset_state_excludes_non_fixtures(workspace: Workspace) -> None:
+    """dataset_state() must list only actual fixture files, excluding
+    manifest.json and FIXTURE_NOTES.md.
+    """
+    from src.fixtures import dataset_state
+
+    initialize_dataset(
+        originals_dir=workspace.originals_dir,
+        manifest_path=workspace.manifest_path,
+        log=None,
+    )
+    state = dataset_state(workspace.originals_dir)
+    expected_names = sorted(spec.filename for spec in FIXTURE_SPECS)
+    assert state["files_present"] == expected_names
+    assert state["file_count"] == len(FIXTURE_SPECS)
+    assert "manifest.json" not in state["files_present"]
+    assert "FIXTURE_NOTES.md" not in state["files_present"]
+
+
+def test_initialize_dataset_with_custom_spec(workspace: Workspace) -> None:
+    """Passing a single custom FixtureSpec via specs= must create ONLY that
+    fixture and record only that entry in the manifest.
+    """
+    from src.fixtures import FixtureSpec
+
+    custom = FixtureSpec(
+        fixture_id="fx-custom-01",
+        filename="custom_test.bin",
+        description="Custom test fixture",
+        _builder=lambda: b"CUSTOM-CONTENT-1234",
+    )
+    report = initialize_dataset(
+        originals_dir=workspace.originals_dir,
+        manifest_path=workspace.manifest_path,
+        log=None,
+        specs=(custom,),
+        write_notes=False,
+    )
+    assert report.created_count == 1
+    assert (workspace.originals_dir / "custom_test.bin").exists()
+    assert (workspace.originals_dir / "custom_test.bin").read_bytes() == b"CUSTOM-CONTENT-1234"
+
+    manifest = load_manifest(workspace.manifest_path)
+    assert list(manifest.entries.keys()) == ["custom_test.bin"]
+
+    for spec in FIXTURE_SPECS:
+        assert not (workspace.originals_dir / spec.filename).exists()
+
+
+def test_initialize_dataset_write_notes_false(workspace: Workspace) -> None:
+    """When write_notes=False, FIXTURE_NOTES.md must not be created in the
+    originals directory.
+    """
+    initialize_dataset(
+        originals_dir=workspace.originals_dir,
+        manifest_path=workspace.manifest_path,
+        log=None,
+        write_notes=False,
+    )
+    assert not (workspace.originals_dir / "FIXTURE_NOTES.md").exists()
+

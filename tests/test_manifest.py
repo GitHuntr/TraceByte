@@ -229,3 +229,71 @@ def test_rebaseline_on_unknown_fixture_raises(tmp_path: Path) -> None:
             reason="does not exist",
             manifest_path=tmp_path / "manifest.json",
         )
+
+
+def test_manifest_summary_returns_documented_keys(workspace: Workspace) -> None:
+    """manifest_summary() must return exactly the documented keys and the
+    fixture_count / total_bytes values must agree with the entry list.
+    """
+    from src.manifest import manifest_summary
+
+    initialize_dataset(
+        originals_dir=workspace.originals_dir,
+        manifest_path=workspace.manifest_path,
+        log=None,
+    )
+    manifest = load_manifest(workspace.manifest_path)
+    summary = manifest_summary(manifest)
+
+    expected_keys = {
+        "manifest_version",
+        "project",
+        "dataset_name",
+        "created_utc",
+        "updated_utc",
+        "fixture_count",
+        "total_bytes",
+        "tool_versions",
+    }
+    assert set(summary.keys()) == expected_keys
+
+    assert summary["fixture_count"] == len(manifest.entries)
+    assert summary["total_bytes"] == sum(
+        entry.size_bytes for entry in manifest.entries.values()
+    )
+
+
+def test_iter_entries_yields_sorted_by_filename(workspace: Workspace) -> None:
+    """iter_entries() must yield entries in ascending filename order."""
+    from src.manifest import iter_entries
+
+    initialize_dataset(
+        originals_dir=workspace.originals_dir,
+        manifest_path=workspace.manifest_path,
+        log=None,
+    )
+    manifest = load_manifest(workspace.manifest_path)
+    filenames = [entry.filename for entry in iter_entries(manifest)]
+    assert filenames == sorted(filenames)
+    assert len(filenames) == len(manifest.entries)
+
+
+def test_signature_offset_none_round_trips_as_json_null(tmp_path: Path) -> None:
+    """A FixtureEntry with signature_offset=None must serialise as JSON null
+    and deserialise back to None — not 0, not a missing key.
+    """
+    manifest = Manifest()
+    entry = _entry()
+    entry.signature_offset = None
+    manifest.record_baseline(entry)
+
+    path = save_manifest(manifest, tmp_path / "manifest.json")
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    fixture_record = raw["fixtures"][0]
+    assert "signature_offset" in fixture_record
+    assert fixture_record["signature_offset"] is None
+
+    reloaded = load_manifest(path)
+    reloaded_entry = reloaded.entries["a.bin"]
+    assert reloaded_entry.signature_offset is None
+
