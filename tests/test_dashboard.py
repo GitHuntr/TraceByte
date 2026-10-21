@@ -4,10 +4,16 @@ These tests drive the real Streamlit application through
 ``streamlit.testing.v1.AppTest`` (no browser, no server required). All file
 system access is redirected to a temporary directory, so the real evidence set
 in ``data/originals`` is never touched.
+
+The redirection covers the experiment outputs and the recovered candidates as
+well: the fixture patches the canonical locations in ``src.paths`` and the
+application resolves them when a run starts, so no test run can write to the
+real ``data/experiments``, ``data/recovered`` or ``logs`` directories.
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -27,11 +33,15 @@ def isolated_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect the application to a temporary evidence workspace."""
     originals = tmp_path / "originals"
     logs = tmp_path / "logs"
-    originals.mkdir()
-    logs.mkdir()
+    experiments = tmp_path / "experiments"
+    recovered = tmp_path / "recovered"
+    for directory in (originals, logs, experiments, recovered):
+        directory.mkdir()
     monkeypatch.setattr(paths, "ORIGINALS_DIR", originals)
     monkeypatch.setattr(paths, "MANIFEST_PATH", originals / "manifest.json")
     monkeypatch.setattr(paths, "EXPERIMENT_LOG_PATH", logs / "experiment_log.jsonl")
+    monkeypatch.setattr(paths, "EXPERIMENTS_DIR", experiments)
+    monkeypatch.setattr(paths, "RECOVERED_DIR", recovered)
     return originals
 
 
@@ -160,4 +170,49 @@ def test_results_page_reports_the_measurements(isolated_paths: Path) -> None:
     assert not app.exception
     assert len(app.metric) > 0
     assert any("contiguous" in block.value for block in app.subheader)
+
+
+def test_the_results_page_shows_only_the_selected_run(
+    isolated_paths: Path, tmp_path: Path
+) -> None:
+    """Every run keeps its own artefacts and the page shows one run at a time."""
+    app = _app()
+    app.run()
+    app.switch_page("app/views/dataset.py")
+    app.run()
+    _button(app, "Initialise dataset").click().run()
+
+    app.switch_page("app/views/carve.py")
+    app.run()
+    _button(app, "Run carving experiments").click().run()
+    _button(app, "Run carving experiments").click().run()
+
+    app.switch_page("app/views/results.py")
+    app.run()
+    assert not app.exception
+
+    runs = []
+    for path in (tmp_path / "experiments").iterdir():
+        if not path.is_dir():
+            continue
+        manifest = json.loads((path / "run.json").read_text(encoding="utf-8"))
+        runs.append((manifest["created_utc"], path.name))
+    runs.sort()
+    assert len(runs) == 2
+    oldest, newest = runs[0][1], runs[-1][1]
+
+    selector = app.selectbox[0]
+    assert len(selector.options) == 2
+
+    captions = " ".join(caption.value for caption in app.caption)
+    assert newest in captions
+    assert oldest not in captions
+
+    app.selectbox[0].select_index(0)
+    app.run()
+    assert not app.exception
+
+    captions = " ".join(caption.value for caption in app.caption)
+    assert oldest in captions
+    assert newest not in captions
 

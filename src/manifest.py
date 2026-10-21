@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .experiment_log import utc_now_iso
-from .paths import MANIFEST_PATH
+from . import paths
 
 MANIFEST_VERSION = "1.0"
 PROJECT_NAME = "TraceByte"
@@ -141,14 +141,36 @@ class Manifest:
         )
 
 
-def load_manifest(path: str | Path = MANIFEST_PATH) -> Manifest:
+def resolve_manifest_path(
+    originals_dir: str | Path | None = None,
+    manifest_path: str | Path | None = None,
+) -> Path:
+    """Return the manifest that belongs to the given originals workspace.
+
+    An explicit *manifest_path* always wins. Without one, the manifest of the
+    originals workspace in play is used: the canonical one when the canonical
+    originals directory is in play, the one inside the workspace otherwise.
+    A caller that works in a sandbox therefore never reads from - and never
+    writes to - the real baseline manifest.
+    """
+    if manifest_path is not None:
+        return Path(manifest_path)
+    if originals_dir is None:
+        return paths.MANIFEST_PATH
+    return Path(originals_dir) / paths.MANIFEST_FILE_NAME
+
+
+def load_manifest(path: str | Path | None = None) -> Manifest:
     """Load the manifest from disk.
 
     A missing manifest yields an empty manifest (and does not raise); a
     corrupted manifest raises ``ValueError`` so that the operator is never
     silently handed an empty baseline.
+
+    The canonical location is resolved when the manifest is loaded, not when
+    this module is imported, so a redirected location is honoured.
     """
-    manifest_path = Path(path)
+    manifest_path = Path(path) if path is not None else paths.MANIFEST_PATH
     if not manifest_path.exists():
         return Manifest(created_utc=utc_now_iso(), updated_utc=utc_now_iso())
     try:
@@ -163,15 +185,24 @@ def load_manifest(path: str | Path = MANIFEST_PATH) -> Manifest:
     return Manifest.from_dict(data)
 
 
-def save_manifest(manifest: Manifest, path: str | Path = MANIFEST_PATH) -> Path:
+def manifest_payload(manifest: Manifest) -> str:
+    """Return the exact text :func:`save_manifest` writes for *manifest*.
+
+    Used to compare the desired manifest with the file on disk *before*
+    writing, so an unchanged baseline is left byte for byte alone.
+    """
+    return json.dumps(manifest.to_dict(), indent=2, sort_keys=False) + "\n"
+
+
+def save_manifest(manifest: Manifest, path: str | Path | None = None) -> Path:
     """Write the manifest to disk atomically.
 
     The file is written to a temporary file in the same directory and then
     moved into place, so an interrupted write cannot corrupt the baseline.
     """
-    manifest_path = Path(path)
+    manifest_path = Path(path) if path is not None else paths.MANIFEST_PATH
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(manifest.to_dict(), indent=2, sort_keys=False) + "\n"
+    payload = manifest_payload(manifest)
 
     handle = tempfile.NamedTemporaryFile(
         "w",
@@ -202,7 +233,7 @@ def rebaseline_entry(
     *,
     reason: str,
     log: Any | None = None,
-    manifest_path: str | Path = MANIFEST_PATH,
+    manifest_path: str | Path | None = None,
 ) -> FixtureEntry:
     """Deliberately replace a baseline digest.
 

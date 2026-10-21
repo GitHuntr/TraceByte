@@ -16,11 +16,17 @@ def get_manifest(manifest_path: str) -> Manifest:
 
 
 @st.cache_data(ttl="10s", show_spinner=False)
-def get_experiment_metrics(experiments_dir: str) -> list[ConditionMetrics]:
-    """Return the metrics of every experiment that was run (read-only)."""
+def get_experiment_metrics(
+    experiments_dir: str, run_id: str | None = None
+) -> list[ConditionMetrics]:
+    """Return the metrics of one experiment run (read-only).
+
+    The run identifier is part of the cache key, so switching the run in the
+    dashboard never shows the measurements of another run.
+    """
     from src.experiments import load_experiment_metrics
 
-    return load_experiment_metrics(experiments_dir)
+    return load_experiment_metrics(experiments_dir, run_id)
 
 
 @st.cache_data(ttl="30s", show_spinner=False)

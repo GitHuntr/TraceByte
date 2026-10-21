@@ -16,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import streamlit as st
 
-from app.branding import APP_ICON, PAGE_TITLE, footer, sidebar_brand
+from app.branding import APP_ICON, PAGE_TITLE, footer, sidebar_brand, sidebar_status
 from src.paths import ensure_project_directories
 
 ensure_project_directories()
@@ -78,7 +78,7 @@ def main() -> None:
         position="sidebar",
     )
 
-    st.title(f"{page.icon} {page.title}")
+    sidebar_status()
     page.run()
     footer()
 

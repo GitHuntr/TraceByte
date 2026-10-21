@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .paths import EXPERIMENT_LOG_PATH
+from . import paths
 
 LOG_FILE_NAME = "experiment_log.jsonl"
 
@@ -54,12 +54,15 @@ class ExperimentLog:
 
     def __init__(
         self,
-        path: str | Path = EXPERIMENT_LOG_PATH,
+        path: str | Path | None = None,
         *,
         enabled: bool = True,
         run_id: str | None = None,
     ) -> None:
-        self.path = Path(path)
+        # The path is resolved when the log is created, not when this module
+        # is imported, so that a caller can redirect the canonical location
+        # (tests, sandboxes) and still be honoured.
+        self.path = Path(path) if path is not None else paths.EXPERIMENT_LOG_PATH
         self.enabled = enabled
         self.run_id = run_id or uuid.uuid4().hex[:12]
         self._versions = tool_versions()
@@ -119,7 +122,7 @@ class ExperimentLog:
 
 def default_log() -> ExperimentLog:
     """Return an experiment log bound to the canonical project location."""
-    return ExperimentLog(EXPERIMENT_LOG_PATH)
+    return ExperimentLog()
 
 
 if __name__ == "__main__":  # pragma: no cover - manual smoke test helper

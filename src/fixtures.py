@@ -32,9 +32,12 @@ from .manifest import (
     FixtureEntry,
     Manifest,
     load_manifest,
+    manifest_payload,
+    resolve_manifest_path,
     save_manifest,
 )
-from .paths import MANIFEST_PATH, NON_FIXTURE_FILES, ORIGINALS_DIR, relative_to_project
+from . import paths
+from .paths import NON_FIXTURE_FILES, relative_to_project
 
 SEED_NAMESPACE = "FileCarveLab/v1"
 
@@ -367,6 +370,9 @@ class DatasetInitReport:
     actions: list[FixtureAction] = field(default_factory=list)
     log_path: str = ""
     warnings: list[str] = field(default_factory=list)
+    #: ``True`` only when the manifest file on disk was actually written.
+    #: An unchanged baseline is left byte for byte alone.
+    manifest_written: bool = False
 
     @property
     def created_count(self) -> int:
@@ -412,8 +418,8 @@ def write_bytes_atomically(target: Path, data: bytes) -> None:
 
 
 def initialize_dataset(
-    originals_dir: str | Path = ORIGINALS_DIR,
-    manifest_path: str | Path = MANIFEST_PATH,
+    originals_dir: str | Path | None = None,
+    manifest_path: str | Path | None = None,
     *,
     log: ExperimentLog | None = None,
     specs: tuple[FixtureSpec, ...] = FIXTURE_SPECS,
@@ -428,9 +434,26 @@ def initialize_dataset(
     * If a file exists on disk but has no baseline entry, it is adopted as a
       baseline *and clearly flagged* (``adopted-existing-unregistered``) in the
       manifest and in the experiment log - never silently.
+    * The manifest is only written when its content actually changed, so
+      re-initialising an unchanged dataset leaves the baseline file byte for
+      byte identical (including ``updated_utc``). The only content that is
+      refreshed on every run is the ``tool_versions`` block - the recorded
+      versions of the tools that produced the dataset. If those versions
+      changed, the manifest is rewritten and ``updated_utc`` is refreshed;
+      nothing else about the baseline changes.
+    * The manifest lives inside the originals workspace: passing an explicit
+      ``originals_dir`` never touches the canonical manifest.
+
+    The canonical locations are resolved when the dataset is initialised, not
+    when this module is imported, so a redirected workspace is honoured.
     """
-    originals_dir = Path(originals_dir)
-    manifest_path = Path(manifest_path)
+    explicit_originals_dir = originals_dir is not None
+    originals_dir = (
+        Path(originals_dir) if originals_dir is not None else paths.ORIGINALS_DIR
+    )
+    manifest_path = resolve_manifest_path(
+        originals_dir if explicit_originals_dir else None, manifest_path
+    )
     originals_dir.mkdir(parents=True, exist_ok=True)
 
     manifest_existed = manifest_path.exists()
@@ -570,9 +593,15 @@ def initialize_dataset(
         if not notes_path.exists() or notes_path.read_text(encoding="utf-8") != notes_text:
             write_bytes_atomically(notes_path, notes_text.encode("utf-8"))
 
-    manifest.updated_utc = now
     manifest.tool_versions = tool_versions()
-    save_manifest(manifest, manifest_path)
+    desired_payload = manifest_payload(manifest)
+    current_payload = (
+        manifest_path.read_text(encoding="utf-8") if manifest_path.exists() else None
+    )
+    manifest_written = current_payload != desired_payload
+    if manifest_written:
+        manifest.updated_utc = now
+        save_manifest(manifest, manifest_path)
 
     report = DatasetInitReport(
         manifest_path=relative_to_project(manifest_path),
@@ -580,6 +609,7 @@ def initialize_dataset(
         actions=actions,
         log_path=str(log.path) if log else "",
         warnings=warnings,
+        manifest_written=manifest_written,
     )
 
     if log is not None:
@@ -588,6 +618,7 @@ def initialize_dataset(
             {
                 "manifest_path": report.manifest_path,
                 "manifest_created": report.manifest_created,
+                "manifest_written": report.manifest_written,
                 "created": report.created_count,
                 "preserved": report.preserved_count,
                 "adopted": report.adopted_count,
@@ -611,9 +642,11 @@ def initialize_dataset(
     return report
 
 
-def dataset_state(originals_dir: str | Path = ORIGINALS_DIR) -> dict[str, Any]:
+def dataset_state(originals_dir: str | Path | None = None) -> dict[str, Any]:
     """Return a small dict describing the current state of the dataset."""
-    originals_dir = Path(originals_dir)
+    originals_dir = (
+        Path(originals_dir) if originals_dir is not None else paths.ORIGINALS_DIR
+    )
     present = sorted(
         path.name
         for path in originals_dir.glob("*")

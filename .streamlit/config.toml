@@ -1,13 +1,70 @@
+# Theme for the FileCarveLab dashboard (TraceByte).
+#
+# Dark instrument theme: a deep navy canvas, one cyan accent for interactive
+# elements, semantic colours for the evidence states and a muted categorical
+# palette for the charts. The primary colour is deliberately mid-dark so that
+# the white label of a primary button keeps a readable contrast.
+
 [theme]
-primaryColor = "#22D3EE"
+base = "dark"
+primaryColor = "#0284C7"
 backgroundColor = "#0B1220"
 secondaryBackgroundColor = "#131C2E"
 textColor = "#E2E8F0"
-font = "sans serif"
+linkColor = "#7DD3FC"
+codeTextColor = "#CBD5E1"
+codeBackgroundColor = "#0F172A"
+borderColor = "#1E293B"
+
+font = "sans-serif"
+codeFont = "monospace"
+baseFontSize = 15
+baseFontWeight = 400
+codeFontSize = "13px"
+headingFontSizes = ["34px", "26px", "21px", "17px", "15px", "13px"]
+headingFontWeights = [700, 600, 600, 600, 600, 600]
+linkUnderline = false
+
+baseRadius = "10px"
+buttonRadius = "8px"
+showWidgetBorder = true
+showSidebarBorder = true
+
+redColor = "#F87171"
+orangeColor = "#FB923C"
+yellowColor = "#FACC15"
+greenColor = "#34D399"
+blueColor = "#60A5FA"
+violetColor = "#A78BFA"
+grayColor = "#94A3B8"
+
+dataframeBorderColor = "#1E293B"
+dataframeHeaderBackgroundColor = "#162034"
+
+chartCategoricalColors = [
+    "#38BDF8",
+    "#34D399",
+    "#FB923C",
+    "#A78BFA",
+    "#F87171",
+    "#FACC15",
+    "#94A3B8",
+]
+
+[theme.sidebar]
+backgroundColor = "#0E1626"
+secondaryBackgroundColor = "#131C2E"
+codeBackgroundColor = "#0B1220"
+textColor = "#CBD5E1"
+borderColor = "#1E293B"
+primaryColor = "#0284C7"
 
 [server]
 headless = true
 runOnSave = true
+
+[client]
+toolbarMode = "minimal"
 
 [browser]
 gatherUsageStats = false

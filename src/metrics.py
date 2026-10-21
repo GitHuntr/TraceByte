@@ -122,6 +122,7 @@ class ConditionMetrics:
     experiment_id: str
     image_path: str
     image_sha256: str
+    run_id: str = ""
     ground_truth_files: int = 0
     ground_truth_instances: int = 0
     detection: Score = field(default_factory=Score)
@@ -140,6 +141,7 @@ class ConditionMetrics:
             "experiment_id": self.experiment_id,
             "image_path": self.image_path,
             "image_sha256": self.image_sha256,
+            "run_id": self.run_id,
             "ground_truth_files": self.ground_truth_files,
             "ground_truth_instances": self.ground_truth_instances,
             "detection": self.detection.to_dict(),
@@ -218,6 +220,7 @@ def evaluate_condition(
     candidates: list[CarveCandidate],
     candidate_payloads: dict[str, bytes] | None = None,
     originals: dict[str, bytes] | None = None,
+    run_id: str = "",
 ) -> ConditionMetrics:
     """Score one condition against its ground-truth map.
 
@@ -226,6 +229,8 @@ def evaluate_condition(
             used to compute byte coverage.
         originals: optional mapping ``file_id -> original bytes``, used to
             compute byte coverage.
+        run_id: optional identifier of the experiment run the measurement
+            belongs to.
     """
     candidate_payloads = candidate_payloads or {}
     originals = originals or {}
@@ -235,6 +240,7 @@ def evaluate_condition(
         experiment_id=experiment_id,
         image_path=image_path,
         image_sha256=image_sha256,
+        run_id=run_id,
         ground_truth_files=len(ground_truth),
     )
 

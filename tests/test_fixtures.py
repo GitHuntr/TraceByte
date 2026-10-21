@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from src.fixtures import (
     FIXTURE_SPECS,
     JPEG_APP0_HEADER,
@@ -159,6 +161,67 @@ def test_initialize_dataset_is_idempotent(workspace: Workspace) -> None:
         "baseline hashes changed during re-initialisation"
     )
     assert first.created_count == second.preserved_count
+
+
+def test_repeated_initialisation_leaves_the_manifest_byte_identical(
+    workspace: Workspace,
+) -> None:
+    """An unchanged baseline must not be rewritten - byte for byte.
+
+    The manifest is the evidence record of the ground truth. Re-running the
+    initialisation must not touch it, not even its ``updated_utc`` stamp.
+    """
+    initialize_dataset(
+        originals_dir=workspace.originals_dir,
+        manifest_path=workspace.manifest_path,
+        log=None,
+    )
+    bytes_before = workspace.manifest_path.read_bytes()
+    digest_before = sha256_file(workspace.manifest_path)
+    updated_before = json.loads(bytes_before)["updated_utc"]
+
+    report = initialize_dataset(
+        originals_dir=workspace.originals_dir,
+        manifest_path=workspace.manifest_path,
+        log=None,
+    )
+
+    bytes_after = workspace.manifest_path.read_bytes()
+    assert report.manifest_written is False
+    assert bytes_after == bytes_before, "the manifest was rewritten without a reason"
+    assert sha256_file(workspace.manifest_path) == digest_before
+    assert json.loads(bytes_after)["updated_utc"] == updated_before
+    assert json.loads(bytes_after)["fixtures"] == json.loads(bytes_before)["fixtures"]
+
+
+def test_the_manifest_is_refreshed_when_the_tool_versions_change(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The recorded tool versions are the one metadata block that is refreshed.
+
+    If they change, the manifest is rewritten and ``updated_utc`` moves - and
+    nothing else about the baseline changes.
+    """
+    initialize_dataset(
+        originals_dir=workspace.originals_dir,
+        manifest_path=workspace.manifest_path,
+        log=None,
+    )
+    before = json.loads(workspace.manifest_path.read_text(encoding="utf-8"))
+    changed = dict(before["tool_versions"])
+    changed["python"] = "0.0.0-test"
+
+    monkeypatch.setattr("src.fixtures.tool_versions", lambda: changed)
+    report = initialize_dataset(
+        originals_dir=workspace.originals_dir,
+        manifest_path=workspace.manifest_path,
+        log=None,
+    )
+
+    refreshed = json.loads(workspace.manifest_path.read_text(encoding="utf-8"))
+    assert report.manifest_written is True
+    assert refreshed["tool_versions"]["python"] == "0.0.0-test"
+    assert refreshed["fixtures"] == before["fixtures"], "a baseline hash changed"
 
 
 def test_dataset_notes_are_written_next_to_the_fixtures(workspace: Workspace) -> None:

@@ -119,6 +119,7 @@ TraceByte/
 ├── app.py                  # Streamlit entry point (run this)
 ├── app/
 │   ├── branding.py         # FileCarveLab branding and shared UI copy
+│   ├── ui.py               # shared presentation primitives (cards, KPIs, badges)
 │   ├── state.py            # cached, read-only data access for the dashboard
 │   └── views/
 │       ├── home.py         # Overview, guardrails, roadmap
@@ -139,7 +140,7 @@ TraceByte/
 │   ├── carver.py           # Stage 2: the carving engine and its provenance
 │   ├── metrics.py          # Stage 2: detection / recovery / validation scoring
 │   └── experiments.py      # Stage 2: build -> carve -> measure -> log
-├── tests/                  # pytest suite (145 tests)
+├── tests/                  # pytest suite (165 tests)
 ├── data/
 │   ├── originals/          # Ground truth: fixtures + manifest.json  (tracked)
 │   ├── experiments/        # Experimental inputs + measurements       (ignored)
@@ -155,6 +156,44 @@ TraceByte/
 `data/originals/` is **tracked in git on purpose**: it holds the ground truth and the
 baseline manifest, so a reviewer can independently re-verify every hash. The other
 three directories hold regenerable data and are ignored.
+
+### 3.1 How the experiment artefacts are organised
+
+Every run of the carving experiments owns a directory of its own. Two runs can
+therefore never overwrite each other, and the candidates of a run stay
+together:
+
+```
+data/experiments/
+├── run-20261021T120401Z-c7f67afd/          # one run
+│   ├── run.json                            # run manifest (run id, timestamp, conditions)
+│   ├── exp-contiguous/
+│   │   ├── image.bin                       # the built storage image
+│   │   ├── ground_truth.json               # what was planted into it
+│   │   ├── carve_results.json              # every candidate with its provenance
+│   │   └── metrics.json                    # the measured detection / recovery scores
+│   ├── exp-fragmented/…
+│   └── exp-overwritten/…
+└── exp-contiguous/                         # artefacts from before the per-run layout
+    …                                        # (read-only, still selectable in the UI)
+
+data/recovered/
+├── run-20261021T120401Z-c7f67afd/exp-contiguous/<candidate files>
+└── exp-contiguous/<candidate files>         # from before the per-run layout
+```
+
+Rules:
+
+* A run identifier is `run-<UTC timestamp>-<random suffix>`; the three
+  conditions of one run share it.
+* **Nothing is ever deleted.** A later run cannot remove the candidates of an
+  earlier one, and the artefacts written before this layout existed stay where
+  they are. They are exposed as the read-only `legacy` run and can still be
+  selected in the **Carve** and **Results** pages.
+* The dashboard shows **one run at a time**. Both pages have a run selector
+  that lists every run still on disk; the newest one is selected by default.
+* `logs/experiment_log.jsonl` is append-only and records the run identifier of
+  every experiment as `payload.experiment_run_id`.
 
 ---
 
@@ -225,7 +264,38 @@ python -m pytest tests/test_integrity.py -v
 python -m pytest --collect-only -q  # list the tests without running them
 ```
 
-### 4.6 Deactivate the environment (when finished)
+**Verified result.** During the Phase 1.2 audit the suite was collected and
+run end to end: **145 tests collected, 145 passed, 0 failed, 0 skipped**
+(12.3 s, 2026-10-21). The audit also confirmed that the eight original
+fixtures and the baseline manifest were byte-identical before and after the
+run. The current suite is larger (165 tests) after the isolation, artefact
+hygiene and path-resolution work of Phase 1.3A and 1.3C.
+
+### 4.6 What the tests do *not* touch
+
+The test suite never writes to the project itself:
+
+* `data/originals/` and `data/originals/manifest.json` are only ever read.
+  Every test works on a copy in a temporary directory.
+* `data/experiments/`, `data/recovered/` and `logs/experiment_log.jsonl` are
+  not touched either. The canonical locations are resolved **when a run
+  starts**, not when the modules are imported, so the dashboard tests can
+  redirect the application into a temporary workspace.
+* `tests/test_isolation.py` is the regression test for this: it fingerprints
+  the real originals (including the baseline manifest), the experiment, the
+  recovery and the log files, drives a full dashboard carve run and asserts
+  that not a single byte of the real project state changed.
+
+The paths that are *derived* from a directory follow it: redirecting
+`paths.ORIGINALS_DIR` moves `paths.MANIFEST_PATH` with it, redirecting
+`paths.LOGS_DIR` moves `paths.EXPERIMENT_LOG_PATH` with it. A workspace that
+is handed in explicitly also gets its own manifest, so a verification script
+can no longer write to the real baseline while it believes it works in a
+sandbox.
+
+Run the suite as often as you like - the project directory stays untouched.
+
+### 4.7 Deactivate the environment (when finished)
 
 ```powershell
 deactivate
@@ -243,6 +313,13 @@ deactivate
    * Writes a `dataset.initialize` event to `logs/experiment_log.jsonl`.
    * Pressing it again is safe: existing originals are preserved and their baseline
      hashes are left untouched.
+   * The manifest is only written when its content actually changed. An unchanged
+     baseline stays **byte for byte identical** - including its `updated_utc`
+     stamp - so the evidence record of the ground truth is stable. The one
+     metadata block that is refreshed on every run is `tool_versions`: if the
+     recorded tool versions differ from the current ones, the manifest is
+     rewritten and `updated_utc` moves, and nothing else about the baseline
+     changes.
 3. **Integrity** → compares every original with the baseline and reports
    **MATCH**, **MISMATCH**, **MISSING** or **UNREGISTERED**.
    * The **Run detection self-test** button copies one original into a temporary
@@ -254,13 +331,44 @@ deactivate
      validation strategy that is applied to each of them).
    * **Run carving experiments** builds the three images, carves them, measures the
      result and appends an `experiment_completed` event to the experiment log.
-   * Writes to `data/experiments/<experiment>/` (image, ground truth, carve report,
-     metrics) and `data/recovered/<experiment>/` (the carved candidates).
+   * Writes to `data/experiments/<run_id>/<experiment>/` (image, ground truth, carve
+     report, metrics) and `data/recovered/<run_id>/<experiment>/` (the carved
+     candidates). Every run gets its own directory, so an earlier run and its
+     candidates are never overwritten or removed.
+   * The **Runs** selector shows the measurements of one run at a time; the newest
+     run is selected by default and every earlier run can still be opened.
 5. **Results** → the measurements, read back from the artefacts.
-   * A comparison table across the three conditions, a per-file table that separates
-     * *detected*, *carved* and *validated*, the per-signature breakdown and the list
-     of false positives. The metrics can be downloaded as JSON.
+   * A comparison table and a grouped bar chart across the three conditions, one
+     scorecard per condition, a per-file table that separates *detected*, *carved*,
+     *exact* and *span*, the per-signature breakdown and the list of false
+     positives. The comparison can be downloaded as CSV.
+   * The **Run** selector switches between the runs that are still on disk. Only the
+     artefacts of the selected run are shown.
 6. **Experiment log** — the append-only provenance record, newest first.
+   * Filters by event type and by actor, a distribution chart and the full event
+     table with the raw payload. The log itself can be downloaded as JSON Lines.
+
+### 5.1 The look of the dashboard
+
+The interface is built from a small set of shared primitives in `app/ui.py`, so every
+page reads as part of the same product:
+
+* **One dark theme.** `.streamlit/config.toml` defines the whole palette: a deep navy
+  canvas, one cyan accent for interactive elements, semantic colours for the evidence
+  states (green = MATCH, red = MISMATCH, orange = MISSING, yellow = UNREGISTERED) and
+  a muted categorical palette for the charts. The primary colour is deliberately
+  mid-dark, so the white label of a primary button keeps a readable contrast.
+* **Cards instead of walls of text.** Every block is a bordered card with a heading
+  (`section()`), every headline number is a bordered metric card (`kpi_row()`), and
+  the evidence states are rendered as coloured badges (`status_badge()`).
+* **Tables that explain themselves.** Data frames are typed with `column_config`:
+  pinned fixture columns, percent and byte formats, checkboxes for boolean states and
+  progress bars for byte coverage. Nothing is shown as an unformatted string.
+* **Icons as a language.** Material symbols mark the pipeline steps, the guardrails,
+  the condition types and the callouts, so a page can be scanned without reading it.
+* **No custom CSS.** The appearance is controlled by the theme file and by native
+  Streamlit elements only, which keeps the dashboard readable in light mode, in
+  print and in a screen reader.
 
 ---
 
@@ -351,10 +459,15 @@ the per-file table.
 python -c "import json; from src.experiments import run_all_conditions, summarise; print(json.dumps(summarise(run_all_conditions()), indent=2))"
 ```
 
-Every run writes `data/experiments/<experiment>/` (`image.bin`,
-`ground_truth.json`, `carve_results.json`, `metrics.json`) and
-`data/recovered/<experiment>/`, and appends an `experiment_completed` event to
-the experiment log.
+Every run writes `data/experiments/<run_id>/<experiment>/` (`image.bin`,
+`ground_truth.json`, `carve_results.json`, `metrics.json`, plus the `run.json`
+manifest of the run) and `data/recovered/<run_id>/<experiment>/`, and appends an
+`experiment_completed` event to the experiment log. The run identifier is
+printed by `run_all_conditions()` and can be pinned with
+`run_all_conditions(run_id="run-20261021T120401Z-c7f67afd")`.
+
+Earlier runs are never touched: each run owns its directory, and nothing is
+deleted.
 
 ---
 
@@ -404,6 +517,10 @@ python -c "import sys; sys.path.insert(0,'.'); from src.hashing import sha256_fi
   reproducibility checks in Stage 5.
 * **The manifest is not signed.** The baseline is trusted because it lives in version
   control; a detached signature over `manifest.json` is a candidate improvement.
+* **Every run keeps its artefacts.** Because nothing is ever deleted,
+  `data/experiments/` and `data/recovered/` grow with every run. A retention policy
+  (keep the last *n* runs, or a run that the operator explicitly prunes) is a
+  candidate for Stage 5.
 
 ---
 
@@ -412,6 +529,8 @@ python -c "import sys; sys.path.insert(0,'.'); from src.hashing import sha256_fi
 * [x] Deterministic fixture generation (fixed seed, no RNG, no timestamps in content)
 * [x] SHA-256 baseline for every original, recorded in `manifest.json`
 * [x] Originals preserved byte for byte on re-initialisation
+* [x] Baseline manifest preserved byte for byte on re-initialisation (it is only
+      written when its content actually changed)
 * [x] Baselines never regenerated silently
 * [x] Tool versions recorded in the manifest and in every log event
 * [x] Append-only experiment log in JSON Lines
@@ -422,6 +541,14 @@ python -c "import sys; sys.path.insert(0,'.'); from src.hashing import sha256_fi
 * [x] Measured precision / recall from the ground truth, never assumed
 * [x] Automated test suite covering hashing, initialisation, preservation, change
       detection, scanning, carving, conditions and measurement
+* [x] Test suite that never writes to the project: the originals, the baseline
+      manifest, the experiment artefacts and the provenance log are unchanged by a
+      test run (regression test in `tests/test_isolation.py`)
+* [x] Canonical paths resolved when a run starts, and derived paths follow their
+      parent directory, so a redirected workspace can never reach the real
+      baseline manifest or the real provenance log
+* [x] One directory per experiment run, so that runs cannot overwrite each other
+      and no artefact is ever deleted
 * [ ] Failure analysis and final report (Stage 5)
 
 ---
