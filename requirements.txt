@@ -1,4 +1,4 @@
-# TraceByte / FileCarveLab - Stage 1 runtime dependencies
+# TraceByte / FileCarveLab - Stage 2 runtime dependencies
 # Install with:  python -m pip install -r requirements.txt
 
 streamlit>=1.40
