@@ -30,18 +30,12 @@ DISCLAIMER = (
 def sidebar_brand() -> None:
     """Render the FileCarveLab brand block in the sidebar."""
     st.markdown(f":material/fingerprint: **{APP_NAME}**")
-    st.caption(TAGLINE)
-    st.caption(f"{PROJECT_NAME} · {PROJECT_REFERENCE}")
-    st.caption(STAGE_LABEL)
+    st.caption(f"{TAGLINE}  ·  {PROJECT_REFERENCE}")
 
 
 def _status_row(label: str, value: str) -> None:
     """Render one label/value row of the status card."""
-    with st.container(
-        horizontal=True, horizontal_alignment="distribute", vertical_alignment="center"
-    ):
-        st.caption(label)
-        st.markdown(f"**{value}**")
+    st.markdown(f"{label} &nbsp; **{value}**")
 
 
 def sidebar_status() -> None:
@@ -69,7 +63,6 @@ def sidebar_status() -> None:
             _status_row("Fixtures", f"{intact}/{total} match")
         _status_row("Experiment runs", str(len(runs)))
         _status_row("Logged events", str(events.event_count()))
-        st.caption(STAGE_LABEL)
 
 
 def footer() -> None:

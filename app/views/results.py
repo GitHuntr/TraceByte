@@ -59,12 +59,12 @@ selected_run = st.selectbox(
 )
 
 if selected_run == LEGACY_RUN_ID:
-    artefacts = f"`{paths.EXPERIMENTS_DIR}` and `{paths.RECOVERED_DIR}` (legacy layout, read-only)"
+    artefacts = "`data/experiments/` and `data/recovered/` (legacy layout, read-only)"
     notice("Legacy artifacts are read-only. Unreferenced candidate files are reported separately and are never counted as validated recoveries.", kind="warning")
 else:
     artefacts = (
-        f"`{paths.EXPERIMENTS_DIR / selected_run}` and "
-        f"`{paths.RECOVERED_DIR / selected_run}`"
+        f"`data/experiments/{selected_run}` and "
+        f"`data/recovered/{selected_run}`"
     )
 st.caption(f"Showing run **{selected_run}** - artefacts in {artefacts}.")
 
@@ -187,8 +187,6 @@ for raw in records:
             f"{raw.get('ground_truth_instances', 0)} planted instances."
         ),
     ):
-        st.subheader(f"Condition: {condition} - detection and recovery")
-
         st.markdown(
             f":material/check_circle: **{detection.get('tp', 0)} true positives** · "
             f":material/close: **{detection.get('fp', 0)} false positives** · "

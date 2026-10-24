@@ -169,7 +169,7 @@ def test_results_page_reports_the_measurements(isolated_paths: Path) -> None:
     app.run()
     assert not app.exception
     assert len(app.metric) > 0
-    assert any("contiguous" in block.value for block in app.subheader)
+    assert any("contiguous" in block.value for block in app.markdown)
 
 
 def test_the_results_page_shows_only_the_selected_run(

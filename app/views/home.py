@@ -109,7 +109,7 @@ with section(
         ("Stage 2", "Signature scanner and carving engine over the three storage conditions", "COMPLETE"),
         ("Stage 3", "Recovery pipeline, content validation and ground-truth matching", "COMPLETE"),
         ("Stage 4", "Precision / recall measurement and results dashboard", "COMPLETE"),
-        ("Stage 5", "Failure analysis, limitations and final report", "NOT STARTED"),
+        ("Stage 5", "Failure analysis, limitations and final report", "COMPLETE"),
     ):
         with st.container(horizontal=True, vertical_alignment="center"):
             st.markdown(f"**{stage}**")

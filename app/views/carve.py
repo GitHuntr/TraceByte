@@ -256,13 +256,13 @@ with section(
 
     if selected_run == LEGACY_RUN_ID:
         st.caption(
-            f"Artefacts of the selected run: `{paths.EXPERIMENTS_DIR}` | "
-            f"`{paths.RECOVERED_DIR}` (legacy layout, read-only)"
+            "Artefacts of the selected run: `data/experiments/` | "
+            "`data/recovered/` (legacy layout, read-only)"
         )
     else:
         st.caption(
-            f"Artefacts of the selected run: `{paths.EXPERIMENTS_DIR / selected_run}` | "
-            f"`{paths.RECOVERED_DIR / selected_run}`"
+            f"Artefacts of the selected run: `data/experiments/{selected_run}` | "
+            f"`data/recovered/{selected_run}`"
         )
 
     st.download_button(
