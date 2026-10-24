@@ -264,12 +264,12 @@ python -m pytest tests/test_integrity.py -v
 python -m pytest --collect-only -q  # list the tests without running them
 ```
 
-**Verified result.** During the Phase 1.2 audit the suite was collected and
-run end to end: **145 tests collected, 145 passed, 0 failed, 0 skipped**
-(12.3 s, 2026-10-21). The audit also confirmed that the eight original
-fixtures and the baseline manifest were byte-identical before and after the
-run. The current suite is larger (165 tests) after the isolation, artefact
-hygiene and path-resolution work of Phase 1.3A and 1.3C.
+**Verified result.** During Phase 1.3 the automated suite was expanded with
+regression tests covering run isolation, safe run manifests, path-traversal
+rejection, legacy compatibility, and status tracking: **170 tests collected,
+170 passed, 0 failed, 0 skipped** (~17.5 s, 2026-10-24). The audit confirmed that the
+eight original fixtures and the baseline manifest were byte-identical before
+and after the run.
 
 ### 4.6 What the tests do *not* touch
 

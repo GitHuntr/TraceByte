@@ -73,6 +73,26 @@ def experiment_id_for(condition: str) -> str:
     return f"exp-{condition}"
 
 
+import re
+
+
+_RUN_ID_RE = re.compile(r"^run-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$")
+_LEGACY_ID = LEGACY_RUN_ID
+
+
+def _is_safe_run_id(run_id: str) -> bool:
+    """Return ``True`` if *run_id* is a safe, well-formed run identifier."""
+    if not isinstance(run_id, str):
+        return False
+    if run_id == _LEGACY_ID:
+        return True
+    if "/" in run_id or "\\" in run_id or run_id in {".", ".."}:
+        return False
+    if Path(run_id).name != run_id:
+        return False
+    return bool(_RUN_ID_RE.match(run_id))
+
+
 def new_run_id(now: datetime | None = None) -> str:
     """Return a unique identifier for one experiment run.
 
@@ -106,13 +126,15 @@ class RunInfo:
     path: Path
     legacy: bool = False
     conditions: tuple[str, ...] = ()
+    status: str = "complete"
 
     @property
     def label(self) -> str:
         """Return a human readable label for the run."""
         if self.legacy:
             return f"{LEGACY_RUN_ID} (artefacts from before the per-run layout)"
-        return f"{self.run_id} ({self.created_utc})"
+        status_suffix = f" [{self.status}]" if self.status != "complete" else ""
+        return f"{self.run_id} ({self.created_utc}){status_suffix}"
 
 
 @dataclass
@@ -176,11 +198,14 @@ def run_condition(
 
     manifest = manifest if manifest is not None else load_manifest(manifest_path)
     experiment_id = experiment_id_for(condition)
+    if run_id is not None and not _is_safe_run_id(run_id):
+        raise ValueError(f"Invalid run_id: {run_id!r}")
     run_id = run_id or new_run_id()
-
     run_dir = experiments_dir / run_id
     experiment_dir = run_dir / experiment_id
     recovered_run_dir = recovered_dir / run_id
+    if experiment_dir.exists():
+        raise ValueError(f"Run {run_id} condition {condition} already exists")
 
     image = build_image(
         condition,
@@ -293,27 +318,82 @@ def run_all_conditions(
     """
     manifest_path = resolve_manifest_path(originals_dir, manifest_path)
     manifest = manifest if manifest is not None else load_manifest(manifest_path)
+    if run_id is not None and not _is_safe_run_id(run_id):
+        raise ValueError(f"Invalid run_id: {run_id!r}")
     run_id = run_id or new_run_id()
+    # Prevent overwriting existing runs
+    directory = Path(experiments_dir) if experiments_dir is not None else paths.EXPERIMENTS_DIR
+    run_dir = directory / run_id
+    if run_dir.exists():
+        raise ValueError(f"Run {run_id} already exists")
+
+    # Initialize run manifest with 'running' status
+    _write_run_manifest(
+        run_dir,
+        {
+            "run_id": run_id,
+            "created_utc": _utc_now_micro(),
+            "updated_utc": _utc_now_micro(),
+            "tool_version": EXPERIMENT_ACTOR,
+            "status": "running",
+            "conditions": [],
+        },
+    )
+
     results: list[ExperimentResult] = []
-    for condition in (
-        CONDITION_CONTIGUOUS,
-        CONDITION_FRAGMENTED,
-        CONDITION_OVERWRITTEN,
-    ):
-        results.append(
-            run_condition(
-                condition,
-                originals_dir=originals_dir,
-                manifest_path=manifest_path,
-                experiments_dir=experiments_dir,
-                recovered_dir=recovered_dir,
-                manifest=manifest,
-                log=log,
-                max_size=max_size,
-                run_id=run_id,
+    try:
+        for condition in (
+            CONDITION_CONTIGUOUS,
+            CONDITION_FRAGMENTED,
+            CONDITION_OVERWRITTEN,
+        ):
+            results.append(
+                run_condition(
+                    condition,
+                    originals_dir=originals_dir,
+                    manifest_path=manifest_path,
+                    experiments_dir=experiments_dir,
+                    recovered_dir=recovered_dir,
+                    manifest=manifest,
+                    log=log,
+                    max_size=max_size,
+                    run_id=run_id,
+                )
             )
-        )
-    return results
+
+        # Validate that all required conditions and artifacts exist before marking complete
+        required_conditions = {"exp-contiguous", "exp-fragmented", "exp-overwritten"}
+        all_artifacts_present = True
+        for cond_id in required_conditions:
+            cond_dir = run_dir / cond_id
+            if not (
+                (cond_dir / IMAGE_NAME).is_file()
+                and (cond_dir / GROUND_TRUTH_NAME).is_file()
+                and (cond_dir / CARVE_REPORT_NAME).is_file()
+                and (cond_dir / METRICS_NAME).is_file()
+            ):
+                all_artifacts_present = False
+                break
+
+        final_status = "complete" if all_artifacts_present else "partial"
+        rm_path = run_dir / RUN_MANIFEST_NAME
+        rm = load_run_manifest(rm_path)
+        rm["status"] = final_status
+        rm["updated_utc"] = _utc_now_micro()
+        _write_run_manifest(run_dir, rm)
+        return results
+    except Exception:
+        # Mark as failed if possible
+        try:
+            rm_path = run_dir / RUN_MANIFEST_NAME
+            if rm_path.parent.exists():
+                rm = load_run_manifest(rm_path) if rm_path.exists() else {"run_id": run_id}
+                rm["status"] = "failed"
+                rm["updated_utc"] = _utc_now_micro()
+                _write_run_manifest(run_dir, rm)
+        except Exception:
+            pass
+        raise
 
 
 def _load_candidate_payloads(candidates: list[CarveCandidate]) -> dict[str, bytes]:
@@ -332,6 +412,35 @@ def _load_candidate_payloads(candidates: list[CarveCandidate]) -> dict[str, byte
     return payloads
 
 
+def _write_run_manifest(run_dir: Path, payload: dict[str, Any]) -> Path:
+    """Atomically write *payload* as the run manifest in *run_dir*."""
+    import os
+    import tempfile
+
+    run_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = run_dir / RUN_MANIFEST_NAME
+    data = (json.dumps(payload, indent=2) + "\n").encode("utf-8")
+
+    handle = tempfile.NamedTemporaryFile(
+        "wb",
+        dir=run_dir,
+        prefix=".run_manifest-",
+        suffix=".tmp",
+        delete=False,
+    )
+    temp_path = Path(handle.name)
+    try:
+        with handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, manifest_path)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+    return manifest_path
+
+
 def _record_run_manifest(
     run_dir: Path,
     *,
@@ -340,6 +449,7 @@ def _record_run_manifest(
     experiment_id: str,
     artefacts: dict[str, str],
     candidate_count: int,
+    status: str | None = None,
 ) -> Path:
     """Add one condition to the manifest of *run_dir* and write it to disk.
 
@@ -379,7 +489,16 @@ def _record_run_manifest(
     entries.sort(key=lambda entry: entry.get("experiment_id", ""))
     payload["conditions"] = entries
 
-    manifest_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    required = {"exp-contiguous", "exp-fragmented", "exp-overwritten"}
+    cond_ids = {e.get("experiment_id") for e in entries}
+    if status is not None:
+        payload["status"] = status
+    elif required.issubset(cond_ids):
+        payload["status"] = "complete"
+    else:
+        payload["status"] = "partial"
+
+    _write_run_manifest(run_dir, payload)
     return manifest_path
 
 
@@ -396,7 +515,19 @@ def load_run_manifest(path: str | Path) -> dict[str, Any]:
         raw = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
-    return raw if isinstance(raw, dict) else {}
+    if not isinstance(raw, dict):
+        return {}
+    # Validate run_id matches directory name if possible
+    parent = manifest_path.parent
+    run_id_in_manifest = raw.get("run_id")
+    if (
+        isinstance(run_id_in_manifest, str)
+        and parent.name
+        and run_id_in_manifest != parent.name
+        and parent.name != ""
+    ):
+        raw["_id_mismatch"] = True
+    return raw
 
 
 def list_runs(experiments_dir: str | Path | None = None) -> list[RunInfo]:
@@ -418,11 +549,34 @@ def list_runs(experiments_dir: str | Path | None = None) -> list[RunInfo]:
         manifest_path = child / RUN_MANIFEST_NAME
         if manifest_path.is_file():
             payload = load_run_manifest(manifest_path)
+            # Enforce run ID matching directory name when run_id is present
+            manifest_run_id = payload.get("run_id")
+            if (
+                isinstance(manifest_run_id, str)
+                and manifest_run_id != child.name
+                and child.name != ""
+            ):
+                continue
+
             conditions = tuple(
                 entry.get("experiment_id", "")
                 for entry in payload.get("conditions", [])
                 if isinstance(entry, dict)
             )
+
+            # Determine / validate status
+            required = {"exp-contiguous", "exp-fragmented", "exp-overwritten"}
+            status = payload.get("status")
+            if status not in {"complete", "partial", "failed", "running"}:
+                if required.issubset(set(conditions)) and all(
+                    (child / c / METRICS_NAME).is_file() for c in conditions
+                ):
+                    status = "complete"
+                elif conditions:
+                    status = "partial"
+                else:
+                    status = "unknown"
+
             runs.append(
                 RunInfo(
                     run_id=payload.get("run_id") or child.name,
@@ -430,10 +584,25 @@ def list_runs(experiments_dir: str | Path | None = None) -> list[RunInfo]:
                     path=child,
                     legacy=False,
                     conditions=conditions,
+                    status=status,
                 )
             )
         elif child.name.startswith("exp-"):
             legacy_dirs.append(child)
+        else:
+            # Directory without run.json: remain discoverable as unknown
+            sub_metrics = list(child.glob("*/metrics.json"))
+            if sub_metrics or child.name.startswith("run-"):
+                runs.append(
+                    RunInfo(
+                        run_id=child.name,
+                        created_utc="",
+                        path=child,
+                        legacy=False,
+                        conditions=tuple(p.parent.name for p in sub_metrics),
+                        status="unknown",
+                    )
+                )
 
     if legacy_dirs:
         newest = max(path.stat().st_mtime for path in legacy_dirs)
@@ -446,6 +615,7 @@ def list_runs(experiments_dir: str | Path | None = None) -> list[RunInfo]:
                 path=directory,
                 legacy=True,
                 conditions=tuple(path.name for path in legacy_dirs),
+                status="complete",
             )
         )
 
@@ -469,6 +639,8 @@ def latest_run(experiments_dir: str | Path | None = None) -> RunInfo | None:
 def _resolve_run_id(directory: Path, run_id: str | None) -> str | None:
     """Return the run the caller asked for, or the latest one."""
     if run_id is not None:
+        if not _is_safe_run_id(run_id):
+            raise ValueError(f"Invalid run_id: {run_id!r}")
         return run_id
     run = latest_run(directory)
     return run.run_id if run is not None else None
@@ -487,8 +659,23 @@ def metrics_files_for_run(
     if resolved is None:
         return []
     if resolved == LEGACY_RUN_ID:
-        return sorted(directory.glob("*/metrics.json"))
-    return sorted((directory / resolved).glob("*/metrics.json"))
+        # Only look inside direct child exp-* dirs to avoid path traversal
+        legacy_paths = []
+        for child in directory.iterdir():
+            if child.is_dir() and child.name.startswith("exp-"):
+                candidate = child / METRICS_NAME
+                if candidate.is_file():
+                    legacy_paths.append(candidate)
+        return sorted(legacy_paths)
+    run_path = directory / resolved
+    # Ensure the run path is inside the experiments directory
+    try:
+        run_path.resolve().relative_to(directory.resolve())
+    except Exception:
+        raise ValueError(f"Invalid run_id: {resolved!r}")
+    if not run_path.is_dir():
+        return []
+    return sorted(run_path.glob("*/metrics.json"))
 
 
 def load_experiment_metrics(
@@ -503,11 +690,22 @@ def load_experiment_metrics(
     """
     directory = Path(experiments_dir) if experiments_dir is not None else paths.EXPERIMENTS_DIR
     resolved = _resolve_run_id(directory, run_id)
+    if resolved is not None and resolved != LEGACY_RUN_ID and not _is_safe_run_id(resolved):
+        raise ValueError(f"Invalid run_id: {resolved!r}")
     metrics: list[ConditionMetrics] = []
     for path in metrics_files_for_run(directory, resolved):
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        condition = _metrics_from_dict(raw)
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue  # skip malformed
+        try:
+            condition = _metrics_from_dict(raw)
+        except Exception:
+            continue
         if not condition.run_id and resolved:
+            condition.run_id = resolved
+        # Ensure run_id matches resolved
+        if resolved and resolved != LEGACY_RUN_ID:
             condition.run_id = resolved
         metrics.append(condition)
     return metrics

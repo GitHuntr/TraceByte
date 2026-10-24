@@ -384,3 +384,80 @@ def test_the_artefacts_of_the_old_layout_are_still_readable(
     metrics = load_experiment_metrics(workspace.experiments_dir, LEGACY_RUN_ID)
     assert [item.condition for item in metrics] == ["contiguous"]
     assert metrics[0].run_id == LEGACY_RUN_ID
+
+
+def test_invalid_run_ids_and_path_traversal_are_rejected(initialised_workspace) -> None:
+    """Run identifiers with traversal characters or wrong format must be rejected."""
+    workspace, _ = initialised_workspace
+    import pytest
+
+    for bad_id in ("../escaped", "sub/dir", "...", "run-invalid-format", "run/123"):
+        with pytest.raises(ValueError, match="Invalid run_id"):
+            run_condition("contiguous", originals_dir=workspace.originals_dir,
+                          manifest_path=workspace.manifest_path,
+                          experiments_dir=workspace.experiments_dir,
+                          recovered_dir=workspace.recovered_dir,
+                          run_id=bad_id)
+
+
+def test_existing_condition_within_run_cannot_be_overwritten(initialised_workspace) -> None:
+    """Attempting to rerun the same condition with the same run_id must raise ValueError."""
+    workspace, _ = initialised_workspace
+    import pytest
+
+    rid = new_run_id()
+    _run(workspace, "contiguous", run_id=rid)
+    with pytest.raises(ValueError, match="already exists"):
+        _run(workspace, "contiguous", run_id=rid)
+
+
+def test_run_manifest_has_explicit_status(initialised_workspace) -> None:
+    """Full run has status='complete' and single-condition run has status='partial'."""
+    workspace, _ = initialised_workspace
+
+    # Single condition run
+    rid = new_run_id()
+    _run(workspace, "contiguous", run_id=rid)
+    rm = load_run_manifest(workspace.experiments_dir / rid / RUN_MANIFEST_NAME)
+    assert rm.get("status") == "partial"
+
+    # Full multi-condition run
+    full_results = run_all_conditions(
+        originals_dir=workspace.originals_dir,
+        manifest_path=workspace.manifest_path,
+        experiments_dir=workspace.experiments_dir,
+        recovered_dir=workspace.recovered_dir,
+    )
+    full_rid = full_results[0].run_id
+    full_rm = load_run_manifest(workspace.experiments_dir / full_rid / RUN_MANIFEST_NAME)
+    assert full_rm.get("status") == "complete"
+    assert full_rm.get("run_id") == full_rid
+
+
+def test_directory_without_run_manifest_is_discovered_as_unknown(initialised_workspace) -> None:
+    """Directories created without run.json remain discoverable as status='unknown'."""
+    workspace, _ = initialised_workspace
+
+    incomplete_dir = workspace.experiments_dir / "run-20261021T120000Z-deadbeef"
+    incomplete_dir.mkdir(parents=True)
+    (incomplete_dir / "exp-contiguous").mkdir()
+    (incomplete_dir / "exp-contiguous" / METRICS_NAME).write_text("{}", encoding="utf-8")
+
+    runs = list_runs(workspace.experiments_dir)
+    matching = [r for r in runs if r.run_id == incomplete_dir.name]
+    assert len(matching) == 1
+    assert matching[0].status == "unknown"
+
+
+def test_malformed_run_manifest_does_not_crash_list_runs(initialised_workspace) -> None:
+    """A corrupted run.json is handled gracefully and does not crash list_runs."""
+    workspace, _ = initialised_workspace
+
+    bad_dir = workspace.experiments_dir / "run-20261021T120000Z-badbad00"
+    bad_dir.mkdir(parents=True)
+    (bad_dir / RUN_MANIFEST_NAME).write_text("{corrupt json!!", encoding="utf-8")
+
+    # Does not raise
+    runs = list_runs(workspace.experiments_dir)
+    assert isinstance(runs, list)
+

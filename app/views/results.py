@@ -44,6 +44,7 @@ if not runs:
 
 run_labels = {
     run.run_id: f"{run.run_id}  ·  {run.created_utc[:19].replace('T', ' ')} UTC"
+    + (f" [{run.status}]" if getattr(run, "status", "complete") != "complete" else "")
     for run in runs
 }
 selected_run = st.selectbox(
@@ -59,6 +60,7 @@ selected_run = st.selectbox(
 
 if selected_run == LEGACY_RUN_ID:
     artefacts = f"`{paths.EXPERIMENTS_DIR}` and `{paths.RECOVERED_DIR}` (legacy layout, read-only)"
+    notice("Legacy artifacts are read-only. Unreferenced candidate files are reported separately and are never counted as validated recoveries.", kind="warning")
 else:
     artefacts = (
         f"`{paths.EXPERIMENTS_DIR / selected_run}` and "
@@ -76,8 +78,20 @@ if not metrics_files:
     )
     st.stop()
 
-records = [json.loads(path.read_text(encoding="utf-8")) for path in metrics_files]
-records.sort(key=lambda raw: raw.get("condition", ""))
+records = []
+for path in metrics_files:
+    try:
+        records.append(json.loads(path.read_text(encoding="utf-8")))
+    except Exception as e:
+        notice(f"Malformed metrics in {path.name}: {e}", kind="error")
+records.sort(key=lambda raw: raw.get("condition", "")) if records else None
+if not records:
+    empty_state(
+        "error",
+        "No valid measurements found for this run",
+        "The run may be incomplete, failed, or contain malformed artefacts.",
+    )
+    st.stop()
 
 summary = pd.DataFrame(
     [
@@ -270,6 +284,35 @@ for raw in records:
 
         for note in raw.get("notes", []):
             notice(note, kind="warning")
+
+# Report unreferenced candidate files for legacy layout separately (once, outside condition loop)
+if selected_run == LEGACY_RUN_ID:
+    try:
+        exp_dir = paths.EXPERIMENTS_DIR
+        rec_dir = paths.RECOVERED_DIR
+        ref = set()
+        for cdir in exp_dir.iterdir():
+            if cdir.is_dir() and cdir.name.startswith("exp-"):
+                cr = cdir / "carve_results.json"
+                if cr.exists():
+                    try:
+                        cd = json.loads(cr.read_text(encoding="utf-8"))
+                        for cand in cd.get("candidates", []):
+                            op = cand.get("output_path") or cand.get("filename") or cand.get("candidate_id")
+                            if op:
+                                ref.add(Path(op).name)
+                    except Exception:
+                        pass
+        disk = set()
+        for p in rec_dir.rglob("*"):
+            if p.is_file() and p.name != ".gitkeep":
+                disk.add(p.name)
+        unref = sorted(list(disk - ref))
+        if unref:
+            with st.expander(f"Unreferenced candidate files ({len(unref)}) - not counted as recoveries", icon=":material/report:"):
+                st.dataframe(pd.DataFrame({"Unreferenced file": unref}), hide_index=True)
+    except Exception:
+        pass
 
 st.caption(
     "Detection, exact recovery and span recovery are three different questions. "

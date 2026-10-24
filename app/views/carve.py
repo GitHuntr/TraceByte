@@ -136,6 +136,7 @@ with section(
 
     run_labels = {
         run.run_id: f"{run.run_id}  ·  {run.created_utc[:19].replace('T', ' ')} UTC"
+        + (f" [{run.status}]" if getattr(run, "status", "complete") != "complete" else "")
         for run in runs
     }
     selected_run = st.selectbox(
@@ -149,6 +150,12 @@ with section(
         ),
     )
 
+    if selected_run == LEGACY_RUN_ID:
+        notice(
+            "Legacy artifacts are read-only. Unreferenced candidate files are never counted as validated recoveries.",
+            kind="warning",
+        )
+
     metrics_files = metrics_files_for_run(paths.EXPERIMENTS_DIR, selected_run)
     if not metrics_files:
         empty_state(
@@ -160,9 +167,13 @@ with section(
 
     summary_rows = []
     for path in metrics_files:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        detection = raw.get("detection", {})
-        recovery = raw.get("exact_recovery", {})
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            notice(f"Malformed metrics in {path.name}: {e}", kind="warning")
+            continue
+        detection = raw.get("detection", {}) if isinstance(raw.get("detection"), dict) else {}
+        recovery = raw.get("exact_recovery", {}) if isinstance(raw.get("exact_recovery"), dict) else {}
         image_path = Path(raw.get("image_path", ""))
         image_bytes = image_path.stat().st_size if image_path.is_file() else 0
         summary_rows.append(
@@ -178,6 +189,13 @@ with section(
                 "Data completeness": raw.get("data_completeness", 0.0),
             }
         )
+    if not summary_rows:
+        empty_state(
+            "error",
+            "No valid measurements found for this run",
+            "The run may be incomplete or contain malformed artefacts.",
+        )
+        st.stop()
     summary_table = pd.DataFrame(summary_rows)
 
     kpi_row(
