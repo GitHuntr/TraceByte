@@ -22,6 +22,8 @@ from .hashing import DEFAULT_CHUNK_SIZE
 
 #: Signature names supported by the engine.
 JPEG = "JPEG"
+PNG = "PNG"
+GIF = "GIF"
 PDF = "PDF"
 ZIP = "ZIP"
 
@@ -95,6 +97,30 @@ def default_registry() -> "SignatureRegistry":
     """Return the registry with the formats supported by this project."""
     return SignatureRegistry(
         [
+            SignatureSpec(
+                name=PNG,
+                magic=bytes.fromhex("89504E470D0A1A0A"),
+                extension=".png",
+                end_marker=bytes.fromhex("0000000049454E44AE426082"),
+                description="PNG file signature (89 50 4E 47 0D 0A 1A 0A).",
+                validation_strategy=(
+                    "Candidate ends at the PNG IEND chunk marker. Validate the PNG "
+                    "chunk structure and CRCs with a format parser; byte-exact "
+                    "recovery requires comparison with a known original."
+                ),
+            ),
+            SignatureSpec(
+                name=GIF,
+                magic=b"GIF8",
+                extension=".gif",
+                end_marker=b";",
+                description="GIF87a or GIF89a file signature (GIF8).",
+                validation_strategy=(
+                    "Candidate ends at the GIF trailer byte. Validate the complete "
+                    "GIF structure with a format parser; byte-exact recovery "
+                    "requires comparison with a known original."
+                ),
+            ),
             SignatureSpec(
                 name=JPEG,
                 magic=b"\xff\xd8\xff",
@@ -205,6 +231,16 @@ class SignatureRegistry:
             start = index + 1
 
     def scan_file(self, path: str | Path, chunk_size: int = DEFAULT_CHUNK_SIZE) -> list[Detection]:
+        """Scan a file for signatures using chunked reads with overlap."""
+        return self.scan_file_with_hash(path, chunk_size)[0]
+
+    def scan_file_with_hash(
+        self,
+        path: str | Path,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+        *,
+        max_detections: int | None = None,
+    ) -> tuple[list[Detection], str]:
         """Scan a file for signatures using chunked reads with overlap.
 
         Raises:
@@ -214,12 +250,15 @@ class SignatureRegistry:
         file_path = Path(path)
         if chunk_size <= 0:
             raise SignatureError("chunk_size must be a positive integer.")
+        if max_detections is not None and max_detections <= 0:
+            raise SignatureError("max_detections must be a positive integer.")
         if not file_path.exists():
             raise FileNotFoundError(f"No such file: {file_path}")
 
         overlap = max(0, self.max_magic_length - 1)
         detections: list[Detection] = []
         seen: set[tuple[str, int]] = set()
+        digest = hashlib.sha256()
         buffer = b""
         absolute = 0
 
@@ -228,6 +267,7 @@ class SignatureRegistry:
                 chunk = handle.read(chunk_size)
                 if not chunk:
                     break
+                digest.update(chunk)
                 window = buffer + chunk
                 window_start = absolute - len(buffer)
                 for detection in self.scan_bytes(window, source=str(file_path)):
@@ -235,6 +275,11 @@ class SignatureRegistry:
                     key = (detection.signature, absolute_offset)
                     if key in seen:
                         continue
+                    if max_detections is not None and len(detections) >= max_detections:
+                        raise SignatureError(
+                            f"The scan found more than {max_detections:,} signature matches; "
+                            "use a smaller evidence file for this scan."
+                        )
                     seen.add(key)
                     detections.append(
                         Detection(
@@ -251,7 +296,7 @@ class SignatureRegistry:
                 buffer = window[-overlap:] if overlap else b""
 
         detections.sort(key=lambda detection: (detection.offset, detection.signature))
-        return detections
+        return detections, digest.hexdigest()
 
     # -- extent ----------------------------------------------------------
     def find_extent(

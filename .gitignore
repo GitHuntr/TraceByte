@@ -41,11 +41,14 @@ desktop.ini
 # baseline evidence record. Tracking it means a reviewer can independently
 # re-verify the baseline hashes against the committed files.
 #
-# The other three directories hold regenerable or experiment-derived data and
-# are therefore ignored.
+# Runtime evidence, experiment output and logs are local workspaces and are
+# therefore excluded from version control.
 
 data/experiments/*
 !data/experiments/.gitkeep
+
+data/evidence/*
+!data/evidence/.gitkeep
 
 data/recovered/*
 !data/recovered/.gitkeep

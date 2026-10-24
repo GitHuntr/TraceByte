@@ -13,6 +13,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.signatures import (
     JPEG,
+    PNG,
+    GIF,
     PDF,
     ZIP,
     Detection,
@@ -23,17 +25,35 @@ from src.signatures import (
 )
 
 JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"body" + b"\xff\xd9"
+PNG_BYTES = bytes.fromhex("89504E470D0A1A0A") + b"\x00\x00\x00\x00IEND" + bytes.fromhex("AE426082")
+GIF_BYTES = b"GIF89a" + b"body" + b";"
 PDF_BYTES = b"%PDF-1.4\n" + b"body" + b"\n%%EOF"
 ZIP_BYTES = b"PK\x03\x04" + b"body" + b"PK\x05\x06"
 
 
 def test_default_registry_exposes_the_supported_formats() -> None:
     registry = default_registry()
-    assert registry.names() == ["JPEG", "PDF", "ZIP"]
+    assert registry.names() == ["GIF", "JPEG", "PDF", "PNG", "ZIP"]
+    assert registry.get(PNG).magic == bytes.fromhex("89504E470D0A1A0A")
+    assert registry.get(GIF).magic == b"GIF8"
     assert registry.get(JPEG).magic == b"\xff\xd8\xff"
     assert registry.get(PDF).magic == b"%PDF-"
     assert registry.get(ZIP).magic == b"PK\x03\x04"
-    assert registry.max_magic_length == len(b"%PDF-")
+    assert registry.max_magic_length == len(bytes.fromhex("89504E470D0A1A0A"))
+
+
+@pytest.mark.parametrize(
+    ("data", "signature"),
+    [(PNG_BYTES, PNG), (GIF_BYTES, GIF)],
+)
+def test_registry_scans_png_and_gif(data: bytes, signature: str) -> None:
+    registry = default_registry()
+    detections = registry.scan_bytes(data)
+    assert [(item.signature, item.offset) for item in detections] == [(signature, 0)]
+    extent = registry.find_extent(data, detections[0])
+    assert extent.policy == "end_marker"
+    assert extent.structurally_delimited is True
+    assert data[extent.start:extent.end] == data
 
 
 def test_registry_rejects_an_empty_magic_value() -> None:

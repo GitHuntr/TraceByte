@@ -9,6 +9,7 @@ Directory contract
 ``data/originals/``   Ground-truth synthetic fixtures + the baseline manifest.
                       NEVER modified after creation by the application.
 ``data/experiments/`` Experimental inputs derived from the originals.
+``data/evidence/``    Content-addressed copies of user-supplied sources + scan reports.
 ``data/recovered/``   Output of recovery attempts.
 ``logs/``             Append-only experiment log (JSON Lines).
 ``reports/``          Generated report artefacts.

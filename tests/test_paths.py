@@ -44,11 +44,11 @@ def test_relative_to_project_inside_project() -> None:
     assert "\\" not in result
 
 
-def test_relative_to_project_outside_project(tmp_path: Path) -> None:
+def test_relative_to_project_outside_project() -> None:
     """A path outside the project root must be returned as an absolute
     posix-style string.
     """
-    outside = tmp_path / "some" / "file.txt"
+    outside = paths.PROJECT_ROOT.parent / "outside-workspace" / "some" / "file.txt"
     result = paths.relative_to_project(outside)
     assert Path(result).is_absolute() or result.startswith("/")
     assert "\\" not in result

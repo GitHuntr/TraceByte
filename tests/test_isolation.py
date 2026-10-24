@@ -1,13 +1,13 @@
-"""Regression tests for the isolation of the test suite and the dashboard.
+"""Regression tests for the isolation of the test suite and web workbench.
 
-The Phase 1.2 audit found that the dashboard tests wrote to the real
+The Phase 1.2 audit found that the interface tests wrote to the real
 ``data/experiments``, ``data/recovered`` and ``logs`` directories, because the
 canonical locations were captured when the modules were imported instead of
 when a run started.
 
 These tests pin that behaviour down:
 
-* a dashboard run must not change a single byte of the real project state,
+* a workbench run must not change a single byte of the real project state,
   including the ground-truth originals and the baseline manifest,
 * the canonical locations must be resolved when a run starts, so a redirected
   workspace is honoured - including the paths derived from a parent directory
@@ -27,11 +27,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import pytest
-from streamlit.testing.v1 import AppTest
 
 import src.paths as paths
 from src.experiment_log import default_log
 from src.experiments import run_all_conditions
+from src.fixtures import initialize_dataset
 
 #: The canonical project locations, captured before any test redirects them.
 REAL_ORIGINALS_DIR = PROJECT_ROOT / "data" / "originals"
@@ -85,21 +85,10 @@ def _real_manifest_digest() -> str:
     return hashlib.sha256(manifest.read_bytes()).hexdigest()
 
 
-def _run_dashboard_experiments(originals: Path) -> AppTest:
-    """Drive the dashboard through a full carve run inside *originals*."""
-    app = AppTest.from_file(str(PROJECT_ROOT / "app.py"), default_timeout=60)
-    app.run()
-    app.switch_page("app/views/dataset.py")
-    app.run()
-    button = next(b for b in app.button if b.label == "Initialise dataset")
-    button.click().run()
-
-    app.switch_page("app/views/carve.py")
-    app.run()
-    run_button = next(b for b in app.button if b.label == "Run carving experiments")
-    run_button.click().run()
-    assert not app.exception
-    return app
+def _run_workbench_experiments() -> list[object]:
+    """Exercise the same dataset and run actions exposed by the local API."""
+    initialize_dataset(log=default_log())
+    return run_all_conditions(log=default_log())
 
 
 @pytest.fixture()
@@ -119,10 +108,10 @@ def isolated_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return originals
 
 
-def test_the_dashboard_run_does_not_touch_the_real_project_state(
+def test_the_workbench_run_does_not_touch_the_real_project_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The dashboard must not change the real originals, manifest, candidates or log."""
+    """The workbench must not change real originals, manifest, candidates or log."""
     real_targets = _real_project_targets()
     before = _fingerprint(real_targets)
     manifest_digest_before = _real_manifest_digest()
@@ -136,12 +125,12 @@ def test_the_dashboard_run_does_not_touch_the_real_project_state(
     monkeypatch.setattr(paths, "EXPERIMENTS_DIR", isolated / "experiments")
     monkeypatch.setattr(paths, "RECOVERED_DIR", isolated / "recovered")
 
-    _run_dashboard_experiments(isolated / "originals")
+    _run_workbench_experiments()
 
     after = _fingerprint(real_targets)
     assert after == before
     assert _real_manifest_digest() == manifest_digest_before, (
-        "the real baseline manifest was rewritten by a dashboard run"
+        "the real baseline manifest was rewritten by a workbench run"
     )
 
     # The run must really have happened - inside the temporary workspace.
@@ -176,7 +165,10 @@ def test_the_experiment_paths_are_resolved_when_the_run_starts(
     assert list(experiments.glob("*/run.json"))
     assert list(recovered.glob("*/*"))
     for result in results:
-        assert Path(result.artefacts["image"]).is_relative_to(experiments)
+        artefact = Path(result.artefacts["image"])
+        if not artefact.is_absolute():
+            artefact = PROJECT_ROOT / artefact
+        assert artefact.resolve().is_relative_to(experiments.resolve())
 
 
 def test_the_experiment_log_path_is_resolved_when_the_log_is_created(
@@ -193,11 +185,11 @@ def test_the_experiment_log_path_is_resolved_when_the_log_is_created(
     assert log.event_count() == 1
 
 
-def test_the_isolated_workspace_is_used_by_the_dashboard(
+def test_the_isolated_workspace_is_used_by_the_workbench(
     isolated_workspace: Path, tmp_path: Path
 ) -> None:
-    """The dashboard writes into the temporary workspace, nowhere else."""
-    _run_dashboard_experiments(isolated_workspace)
+    """The workbench writes into the temporary workspace, nowhere else."""
+    _run_workbench_experiments()
 
     experiments = tmp_path / "experiments"
     recovered = tmp_path / "recovered"
@@ -258,7 +250,10 @@ def test_initialisation_with_a_redirected_originals_directory_stays_in_the_works
 
     report = initialize_dataset()
 
-    assert Path(report.manifest_path) == (originals / "manifest.json").resolve()
+    reported_manifest = Path(report.manifest_path)
+    if not reported_manifest.is_absolute():
+        reported_manifest = PROJECT_ROOT / reported_manifest
+    assert reported_manifest.resolve() == (originals / "manifest.json").resolve()
     assert (originals / "manifest.json").is_file()
     if real_manifest.is_file():
         assert hashlib.sha256(real_manifest.read_bytes()).hexdigest() == digest_before
@@ -280,7 +275,10 @@ def test_an_explicit_originals_directory_keeps_its_own_manifest(
     workspace = tmp_path / "workspace" / "originals"
     report = initialize_dataset(originals_dir=workspace)
 
-    assert Path(report.manifest_path) == (workspace / "manifest.json").resolve()
+    reported_manifest = Path(report.manifest_path)
+    if not reported_manifest.is_absolute():
+        reported_manifest = PROJECT_ROOT / reported_manifest
+    assert reported_manifest.resolve() == (workspace / "manifest.json").resolve()
     assert (workspace / "manifest.json").is_file()
     if real_manifest.is_file():
         assert hashlib.sha256(real_manifest.read_bytes()).hexdigest() == digest_before

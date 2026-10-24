@@ -1,21 +1,15 @@
-"""Smoke tests for the FileCarveLab dashboard.
-
-These tests drive the real Streamlit application through
-``streamlit.testing.v1.AppTest`` (no browser, no server required). All file
-system access is redirected to a temporary directory, so the real evidence set
-in ``data/originals`` is never touched.
-
-The redirection covers the experiment outputs and the recovered candidates as
-well: the fixture patches the canonical locations in ``src.paths`` and the
-application resolves them when a run starts, so no test run can write to the
-real ``data/experiments``, ``data/recovered`` or ``logs`` directories.
-"""
+"""HTTP smoke tests for the TraceByte Forensic Workbench."""
 
 from __future__ import annotations
 
 import json
+import hashlib
 import sys
+import threading
+from http.server import ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 import pytest
 
@@ -23,196 +17,211 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from streamlit.testing.v1 import AppTest
-
 import src.paths as paths
+from server import TraceByteHandler
 
 
 @pytest.fixture()
 def isolated_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect the application to a temporary evidence workspace."""
+    """Redirect the workbench to a temporary evidence workspace."""
     originals = tmp_path / "originals"
     logs = tmp_path / "logs"
     experiments = tmp_path / "experiments"
     recovered = tmp_path / "recovered"
-    for directory in (originals, logs, experiments, recovered):
+    data = tmp_path / "data"
+    for directory in (originals, logs, experiments, recovered, data):
         directory.mkdir()
     monkeypatch.setattr(paths, "ORIGINALS_DIR", originals)
     monkeypatch.setattr(paths, "MANIFEST_PATH", originals / "manifest.json")
     monkeypatch.setattr(paths, "EXPERIMENT_LOG_PATH", logs / "experiment_log.jsonl")
     monkeypatch.setattr(paths, "EXPERIMENTS_DIR", experiments)
     monkeypatch.setattr(paths, "RECOVERED_DIR", recovered)
+    monkeypatch.setattr(paths, "DATA_DIR", data)
     return originals
 
 
-def _app() -> AppTest:
-    return AppTest.from_file(str(PROJECT_ROOT / "app.py"), default_timeout=60)
+@pytest.fixture()
+def workbench(isolated_paths: Path):
+    """Serve the real request handler on an ephemeral loopback port."""
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), TraceByteHandler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_address[1]}"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=2)
 
 
-def _button(app: AppTest, label: str):
-    matches = [button for button in app.button if button.label == label]
-    assert matches, f"button '{label}' not found on the page"
-    return matches[0]
+def request(
+    workbench: str,
+    route: str,
+    method: str = "GET",
+    *,
+    body: bytes | None = None,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, object, str]:
+    request_body = body if body is not None else b"{}" if method == "POST" else None
+    req = Request(workbench + route, data=request_body, headers=headers or {}, method=method)
+    try:
+        with urlopen(req, timeout=30) as response:
+            body = response.read()
+            content_type = response.headers.get("Content-Type", "")
+            if "application/json" in content_type:
+                body = json.loads(body)
+            return response.status, body, content_type
+    except HTTPError as error:
+        return error.code, json.loads(error.read()), error.headers.get("Content-Type", "")
 
 
-def test_dashboard_launches_without_error(isolated_paths: Path) -> None:
-    app = _app()
-    app.run()
-    assert not app.exception
-    assert app.title
+def test_workbench_serves_shell_and_health(workbench: str) -> None:
+    status, body, content_type = request(workbench, "/")
+    assert status == 200
+    assert "text/html" in content_type
+    assert b"TRACEBYTE" in body
+
+    status, payload, _ = request(workbench, "/api/health")
+    assert status == 200
+    assert payload["status"] == "ok"
 
 
-def test_dataset_page_creates_the_manifest(isolated_paths: Path) -> None:
-    app = _app()
-    app.run()
-    app.switch_page("app/views/dataset.py")
-    app.run()
-    assert not app.exception
+def test_dataset_initialization_and_hex_preview_are_available(workbench: str) -> None:
+    status, result, _ = request(workbench, "/api/dataset/initialize", "POST")
+    assert status == 200
+    assert result["created_count"] > 0
 
-    _button(app, "Initialise dataset").click().run()
+    status, data, _ = request(workbench, "/api/dataset")
+    assert status == 200
+    assert len(data["manifest"]["entries"]) == result["created_count"]
 
-    assert not app.exception
-    manifest_path = isolated_paths / "manifest.json"
-    assert manifest_path.exists()
-    assert (isolated_paths / "synthetic_photo_01.jpg").exists()
-
-
-def test_integrity_page_reports_matching_hashes(isolated_paths: Path) -> None:
-    app = _app()
-    app.run()
-    app.switch_page("app/views/dataset.py")
-    app.run()
-    _button(app, "Initialise dataset").click().run()
-
-    app.switch_page("app/views/integrity.py")
-    app.run()
-    assert not app.exception
-    assert any("match their baseline" in message.value for message in app.success)
+    status, preview, _ = request(workbench, "/api/fixtures/synthetic_photo_01.jpg/hex")
+    assert status == 200
+    assert preview["lines"]
+    assert preview["lines"][0]["offset"] == "00000000"
 
 
-def test_integrity_page_detects_a_modified_copy(isolated_paths: Path) -> None:
-    app = _app()
-    app.run()
-    app.switch_page("app/views/dataset.py")
-    app.run()
-    _button(app, "Initialise dataset").click().run()
+def test_integrity_status_and_change_detection_self_test(workbench: str) -> None:
+    request(workbench, "/api/dataset/initialize", "POST")
+    status, report, _ = request(workbench, "/api/integrity")
+    assert status == 200
+    assert report["summary"]["MATCH"] > 0
+    assert all(row["status"] == "MATCH" for row in report["results"])
 
-    # Tamper with one original after the baseline was recorded.
-    victim = isolated_paths / "synthetic_photo_01.jpg"
-    data = bytearray(victim.read_bytes())
-    data[0] = 0x00
-    victim.write_bytes(bytes(data))
-
-    app.switch_page("app/views/integrity.py")
-    app.run()
-    assert not app.exception
-    assert any("content changed" in message.value for message in app.error)
+    status, result, _ = request(workbench, "/api/integrity/self-test", "POST")
+    assert status == 200
+    assert result["ok"] is True
 
 
-def test_overview_page_renders_metrics(isolated_paths: Path) -> None:
-    """The Overview page (home.py) must render without exception and
-    produce metric widgets and markdown content.
-    """
-    app = _app()
-    app.run()
-    app.switch_page("app/views/home.py")
-    app.run()
-    assert not app.exception
-    assert len(app.metric) > 0
-    assert len(app.markdown) > 0
+def test_run_api_persists_and_reads_measurements_in_isolation(workbench: str) -> None:
+    request(workbench, "/api/dataset/initialize", "POST")
+    status, result, _ = request(workbench, "/api/runs", "POST")
+    assert status == 200
+    assert result["run_id"].startswith("run-")
+
+    status, data, _ = request(workbench, f"/api/runs/{result['run_id']}")
+    assert status == 200
+    assert len(data["records"]) == 3
+    assert {row["condition"] for row in data["records"]} == {
+        "contiguous", "fragmented", "overwritten"
+    }
 
 
-def test_experiment_log_page_renders(isolated_paths: Path) -> None:
-    """The Experiment log page (log.py) must render without exception."""
-    app = _app()
-    app.run()
-    app.switch_page("app/views/log.py")
-    app.run()
-    assert not app.exception
+def test_log_endpoint_supports_event_filters(workbench: str) -> None:
+    request(workbench, "/api/dataset/initialize", "POST")
+    status, all_events, _ = request(workbench, "/api/log")
+    assert status == 200
+    assert all_events["events"]
+
+    status, filtered, _ = request(workbench, "/api/log?event=dataset.initialize")
+    assert status == 200
+    assert filtered["events"]
+    assert all(row["event"] == "dataset.initialize" for row in filtered["events"])
 
 
-def test_carve_page_renders_and_lists_the_signatures(isolated_paths: Path) -> None:
-    app = _app()
-    app.run()
-    app.switch_page("app/views/carve.py")
-    app.run()
-    assert not app.exception
-    assert any("Supported signatures" in block.value for block in app.markdown)
+def test_hex_preview_rejects_unregistered_fixture(workbench: str) -> None:
+    status, payload, _ = request(workbench, "/api/fixtures/%2E%2E%2FREADME.md/hex")
+    assert status == 404
+    assert "error" in payload
 
 
-def test_carve_page_runs_the_experiments(isolated_paths: Path) -> None:
-    app = _app()
-    app.run()
-    app.switch_page("app/views/dataset.py")
-    app.run()
-    _button(app, "Initialise dataset").click().run()
+def test_real_evidence_import_scan_and_candidate_download(workbench: str) -> None:
+    original = b"header" + b"\xff\xd8\xff\xe0photo-data\xff\xd9" + b"tail"
+    status, source, _ = request(
+        workbench,
+        "/api/evidence/import",
+        "POST",
+        body=original,
+        headers={
+            "Content-Type": "application/octet-stream",
+            "X-TraceByte-Filename": "camera%20copy.bin",
+        },
+    )
+    assert status == 201
+    assert source["original_name"] == "camera copy.bin"
+    assert source["sha256"] == hashlib.sha256(original).hexdigest()
 
-    app.switch_page("app/views/carve.py")
-    app.run()
-    _button(app, "Run carving experiments").click().run()
-    assert not app.exception
-    assert any("Ran 3 experiments" in message.value for message in app.success)
+    status, scan, _ = request(
+        workbench,
+        "/api/evidence/scans",
+        "POST",
+        body=json.dumps({"source_id": source["source_id"], "candidate_max_size_mb": 8}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 201
+    assert scan["candidate_count"] == 1
+    assert scan["candidates"][0]["signature"] == "JPEG"
+    assert "source_path" not in scan["candidates"][0]
+    assert "output_path" not in scan["candidates"][0]
+
+    candidate_name = scan["candidates"][0]["output_name"]
+    status, carved, _ = request(
+        workbench,
+        f"/api/evidence/scans/{scan['scan_id']}/files/{candidate_name}",
+    )
+    assert status == 200
+    assert carved == b"\xff\xd8\xff\xe0photo-data\xff\xd9"
+
+    status, report, content_type = request(
+        workbench,
+        f"/api/evidence/scans/{scan['scan_id']}/report",
+    )
+    assert status == 200
+    assert "application/octet-stream" in content_type
+    report_data = json.loads(report)
+    assert report_data["source"]["sha256"] == source["sha256"]
+    assert report_data["candidate_count"] == 1
 
 
-def test_results_page_reports_the_measurements(isolated_paths: Path) -> None:
-    app = _app()
-    app.run()
-    app.switch_page("app/views/dataset.py")
-    app.run()
-    _button(app, "Initialise dataset").click().run()
+def test_real_evidence_png_import_finds_and_downloads_candidate(workbench: str) -> None:
+    png = bytes.fromhex("89504E470D0A1A0A") + b"\x00\x00\x00\x00IEND" + bytes.fromhex("AE426082")
+    status, source, _ = request(
+        workbench,
+        "/api/evidence/import",
+        "POST",
+        body=png,
+        headers={
+            "Content-Type": "application/octet-stream",
+            "X-TraceByte-Filename": "screen.png",
+        },
+    )
+    assert status == 201
 
-    app.switch_page("app/views/carve.py")
-    app.run()
-    _button(app, "Run carving experiments").click().run()
+    status, scan, _ = request(
+        workbench,
+        "/api/evidence/scans",
+        "POST",
+        body=json.dumps({"source_id": source["source_id"], "candidate_max_size_mb": 8}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 201
+    assert scan["candidate_count"] == 1
+    assert scan["candidates"][0]["signature"] == "PNG"
 
-    app.switch_page("app/views/results.py")
-    app.run()
-    assert not app.exception
-    assert len(app.metric) > 0
-    assert any("contiguous" in block.value for block in app.markdown)
-
-
-def test_the_results_page_shows_only_the_selected_run(
-    isolated_paths: Path, tmp_path: Path
-) -> None:
-    """Every run keeps its own artefacts and the page shows one run at a time."""
-    app = _app()
-    app.run()
-    app.switch_page("app/views/dataset.py")
-    app.run()
-    _button(app, "Initialise dataset").click().run()
-
-    app.switch_page("app/views/carve.py")
-    app.run()
-    _button(app, "Run carving experiments").click().run()
-    _button(app, "Run carving experiments").click().run()
-
-    app.switch_page("app/views/results.py")
-    app.run()
-    assert not app.exception
-
-    runs = []
-    for path in (tmp_path / "experiments").iterdir():
-        if not path.is_dir():
-            continue
-        manifest = json.loads((path / "run.json").read_text(encoding="utf-8"))
-        runs.append((manifest["created_utc"], path.name))
-    runs.sort()
-    assert len(runs) == 2
-    oldest, newest = runs[0][1], runs[-1][1]
-
-    selector = app.selectbox[0]
-    assert len(selector.options) == 2
-
-    captions = " ".join(caption.value for caption in app.caption)
-    assert newest in captions
-    assert oldest not in captions
-
-    app.selectbox[0].select_index(0)
-    app.run()
-    assert not app.exception
-
-    captions = " ".join(caption.value for caption in app.caption)
-    assert oldest in captions
-    assert newest not in captions
-
+    candidate_name = scan["candidates"][0]["output_name"]
+    status, carved, _ = request(
+        workbench,
+        f"/api/evidence/scans/{scan['scan_id']}/files/{candidate_name}",
+    )
+    assert status == 200
+    assert carved == png

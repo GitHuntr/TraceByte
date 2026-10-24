@@ -38,7 +38,7 @@ def tool_versions() -> dict[str, str]:
         "python_implementation": platform.python_implementation(),
         "platform": platform.platform(),
     }
-    for module_name in ("streamlit", "pandas", "pytest"):
+    for module_name in ("pytest",):
         try:
             from importlib.metadata import version
 

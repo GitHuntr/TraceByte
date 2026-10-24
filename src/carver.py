@@ -31,10 +31,11 @@ from pathlib import Path
 from typing import Any
 
 from .fixtures import write_bytes_atomically
-from .hashing import sha256_bytes, sha256_file
+from .hashing import sha256_bytes
 from .paths import relative_to_project
 from .signatures import (
     DEFAULT_MAX_CANDIDATE_SIZE,
+    Detection,
     SignatureRegistry,
     default_registry,
 )
@@ -217,26 +218,106 @@ def carve_file(
     condition: str | None = None,
     max_size: int = DEFAULT_MAX_CANDIDATE_SIZE,
     write_output: bool = True,
+    expected_source_sha256: str | None = None,
+    max_candidates: int | None = None,
+    max_output_bytes: int | None = None,
 ) -> list[CarveCandidate]:
-    """Carve a file from disk. The source file is opened read-only."""
+    """Carve a file from disk using bounded memory; the source stays read-only.
+
+    The scanner walks the source in chunks and only reads up to ``max_size``
+    bytes around each hit. This lets the workbench analyze raw images without
+    loading the entire image into memory.
+    """
     source = Path(path)
     if not source.exists():
         raise CarverError(f"No such file: {source}")
     if source.is_dir():
         raise CarverError(f"Not a file: {source}")
+    if max_size <= 0:
+        raise CarverError("max_size must be a positive integer.")
+    if max_output_bytes is not None and max_output_bytes < 0:
+        raise CarverError("max_output_bytes cannot be negative.")
 
-    data = source.read_bytes()
-    return carve_bytes(
-        data,
-        source_path=relative_to_project(source),
-        source_sha256=sha256_file(source),
-        output_dir=output_dir,
-        registry=registry,
-        experiment_id=experiment_id,
-        condition=condition,
-        max_size=max_size,
-        write_output=write_output,
+    registry = registry or default_registry()
+    source_path = relative_to_project(source)
+    detections, source_digest = registry.scan_file_with_hash(
+        source, max_detections=max_candidates
     )
+    if expected_source_sha256 and source_digest.lower() != expected_source_sha256.lower():
+        raise CarverError("The evidence file changed after it was imported; scan stopped.")
+    output_path = Path(output_dir)
+    candidates: list[CarveCandidate] = []
+    output_bytes = 0
+    unique_offsets = sorted({item.offset for item in detections})
+    following_offset = {
+        offset: unique_offsets[index + 1] if index + 1 < len(unique_offsets) else None
+        for index, offset in enumerate(unique_offsets)
+    }
+
+    with source.open("rb") as handle:
+        for detection in detections:
+            next_offset = following_offset[detection.offset]
+            handle.seek(detection.offset)
+            data = handle.read(max_size)
+            local_detection = Detection(
+                signature=detection.signature,
+                offset=0,
+                magic_hex=detection.magic_hex,
+                extension=detection.extension,
+                description=detection.description,
+                validation_strategy=detection.validation_strategy,
+                source=detection.source,
+            )
+            local_next = next_offset - detection.offset if next_offset is not None else None
+            extent = registry.find_extent(
+                data,
+                local_detection,
+                max_size=max_size,
+                next_detection_offset=local_next,
+            )
+            payload = data[extent.start:extent.end]
+            status = STATUS_EMPTY if not payload else STATUS_DELIMITED if extent.structurally_delimited else STATUS_TRUNCATED
+            candidate_id = _candidate_id(experiment_id, detection.signature, detection.offset)
+            output_digest = sha256_bytes(payload) if payload else None
+            output_file: Path | None = None
+            output_skipped_reason: str | None = None
+            if payload and write_output:
+                if max_output_bytes is not None and output_bytes + len(payload) > max_output_bytes:
+                    output_skipped_reason = "The scan output limit was reached; candidate bytes were not written."
+                else:
+                    output_path.mkdir(parents=True, exist_ok=True)
+                    output_file = output_path / f"{candidate_id}__{output_digest[:12]}{detection.extension}"
+                    write_bytes_atomically(output_file, payload)
+                    output_bytes += len(payload)
+
+            candidates.append(
+                CarveCandidate(
+                    candidate_id=candidate_id,
+                    signature=detection.signature,
+                    extension=detection.extension,
+                    source_path=source_path,
+                    source_sha256=source_digest,
+                    offset=detection.offset + extent.start,
+                    end_offset=detection.offset + extent.end,
+                    length=extent.length,
+                    extent_policy=extent.policy,
+                    structurally_delimited=extent.structurally_delimited,
+                    status=status,
+                    output_path=relative_to_project(output_file) if output_file else None,
+                    output_sha256=output_digest,
+                    experiment_id=experiment_id,
+                    condition=condition,
+                    tool_version=TOOL_VERSION,
+                    notes=_notes_for(status, extent.policy),
+                    metadata={
+                        "magic_hex": detection.magic_hex,
+                        "validation_strategy": detection.validation_strategy,
+                        "output_skipped_reason": output_skipped_reason,
+                    },
+                )
+            )
+
+    return candidates
 
 
 def write_candidate_report(

@@ -84,12 +84,12 @@ Reading the table:
 
 ## 2. Forensic and integrity rules applied
 
-1. **Synthetic data only.** Every fixture is generated locally by `src/fixtures.py`
-   from a fixed seed. No real device, disk image, account or third-party data is
-   involved, and no destructive disk operation is performed.
+1. **Synthetic experiment fixtures.** Files used for measured precision and recall
+   are generated locally by `src/fixtures.py` from a fixed seed. The separate real
+   evidence workflow below does not feed imported data into synthetic metrics.
 2. **Separation of concerns.** Ground truth (`data/originals/`), experimental inputs
-   (`data/experiments/`) and recovery output (`data/recovered/`) live in separate
-   directories and are never mixed.
+   (`data/experiments/`), imported evidence copies (`data/evidence/`) and recovery
+   output (`data/recovered/`) live in separate directories and are never mixed.
 3. **Originals are never silently overwritten.** Dataset initialisation creates only
    the files that do not exist yet. An existing original is always preserved byte for
    byte.
@@ -110,24 +110,33 @@ Reading the table:
    marked `fully_parseable = false` in the manifest and are never presented as valid
    recovered media or documents.
 
+### 2.1 Real evidence intake
+
+The **Real evidence** page accepts an individual file or an uncompressed raw image
+up to 2 GiB. The browser sends the selected file to the local workstation, which
+stores a content-addressed copy under `data/evidence/sources/`, records its size and
+SHA-256, and scans that copy without modifying it. Re-importing identical bytes
+reuses the existing copy. Each scan stores a candidate report under
+`data/evidence/scans/` and any extracted candidates under
+`data/recovered/evidence/`; import and scan actions are added to the provenance log.
+
+Real evidence scans currently recognize JPEG, PNG, GIF, PDF and ZIP signatures and cap a scan
+at 5,000 candidates and 512 MiB of extracted output. Operators can choose an 8, 16,
+32 or 64 MiB maximum extent for each candidate. The scanner does not acquire a live device, unpack E01/EWF
+containers, interpret file systems, or establish that a signature hit is a valid
+file. An end marker is only a structural clue. Use a format parser and independent
+validation before treating a candidate as recovered. Precision, recall and exact
+recovery metrics remain available only for synthetic runs with known ground truth.
+
 ---
 
 ## 3. Project structure
 
 ```
 TraceByte/
-├── app.py                  # Streamlit entry point (run this)
-├── app/
-│   ├── branding.py         # FileCarveLab branding and shared UI copy
-│   ├── ui.py               # shared presentation primitives (cards, KPIs, badges)
-│   ├── state.py            # cached, read-only data access for the dashboard
-│   └── views/
-│       ├── home.py         # Overview, guardrails, roadmap
-│       ├── dataset.py      # Dataset initialisation + baseline manifest
-│       ├── integrity.py    # SHA-256 verification against the baseline
-│       ├── carve.py        # Stage 2: build images, run the carving engine
-│       ├── results.py      # Stage 2: the measured accuracy of the engine
-│       └── log.py          # Experiment log viewer
+├── app.py                  # Forensic Workbench entry point (run this)
+├── server.py               # Local HTTP API over the existing Python engine
+├── web/                    # Cyber operations interface (HTML, CSS, JavaScript)
 ├── src/
 │   ├── paths.py            # Canonical project paths
 │   ├── hashing.py          # Chunked SHA-256 utility
@@ -135,19 +144,20 @@ TraceByte/
 │   ├── fixtures.py         # Deterministic synthetic fixtures + initialisation
 │   ├── integrity.py        # Verification, mismatch/missing/unregistered detection
 │   ├── experiment_log.py   # Append-only JSON Lines provenance log
+│   ├── evidence.py         # Local import, hashing, and real-evidence scan records
 │   ├── signatures.py       # Stage 2: signature registry, scanner, extent policies
 │   ├── conditions.py       # Stage 2: the three controlled storage conditions
 │   ├── carver.py           # Stage 2: the carving engine and its provenance
 │   ├── metrics.py          # Stage 2: detection / recovery / validation scoring
 │   └── experiments.py      # Stage 2: build -> carve -> measure -> log
-├── tests/                  # pytest suite (165 tests)
 ├── data/
 │   ├── originals/          # Ground truth: fixtures + manifest.json  (tracked)
 │   ├── experiments/        # Experimental inputs + measurements       (ignored)
+│   ├── evidence/           # Imported source copies + scan reports     (ignored)
 │   └── recovered/          # Carving output                          (ignored)
 ├── logs/                   # experiment_log.jsonl                     (ignored)
 ├── reports/                # Generated report artefacts              (ignored)
-├── .streamlit/config.toml  # Dashboard theme
+├── tests/                  # Engine, isolation, and workbench API checks
 ├── requirements.txt
 ├── pyproject.toml
 └── .gitignore
@@ -230,25 +240,34 @@ C:\Users\aryan\AppData\Local\Python\bin\python.exe -m venv .venv
 > Then activate again. You can also skip activation entirely and call the venv
 > interpreter directly: `.\.venv\Scripts\python.exe -m pip ...`.
 
-### 4.3 Install the dependencies
+### 4.3 Install test tools (optional)
 
 ```powershell
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
+The workbench itself uses the Python standard library and needs no package
+installation. `requirements.txt` contains `pytest` for running the test suite.
+
 ### 4.4 Run the dashboard
 
 ```powershell
-python -m streamlit run app.py
+python app.py
 ```
 
-The dashboard opens at <http://localhost:8501>. Useful alternatives:
+The TraceByte Forensic Workbench opens at <http://127.0.0.1:8510>. It uses a
+local web server and the existing Python forensic engine; no frontend build
+step is needed. The server binds to loopback by default. To choose another
+local port:
 
 ```powershell
-python -m streamlit run app.py --server.port 8502   # different port
-python -m streamlit run app.py --server.headless true
+$env:TRACEBYTE_PORT = 8511
+python server.py
 ```
+
+The interface is served directly by the local Python entry point and does not
+use Streamlit.
 
 ### 4.5 Run the tests
 
@@ -266,10 +285,10 @@ python -m pytest --collect-only -q  # list the tests without running them
 
 **Verified result.** During Phase 1.3 the automated suite was expanded with
 regression tests covering run isolation, safe run manifests, path-traversal
-rejection, legacy compatibility, and status tracking: **170 tests collected,
-170 passed, 0 failed, 0 skipped** (~17.5 s, 2026-10-24). The audit confirmed that the
-eight original fixtures and the baseline manifest were byte-identical before
-and after the run.
+rejection, legacy compatibility, status tracking, and the workbench HTTP API:
+**165 tests collected, 165 passed, 0 failed, 0 skipped** (2026-10-24). The audit
+confirmed that the eight original fixtures and the baseline manifest were
+byte-identical before and after the run.
 
 ### 4.6 What the tests do *not* touch
 
@@ -279,11 +298,11 @@ The test suite never writes to the project itself:
   Every test works on a copy in a temporary directory.
 * `data/experiments/`, `data/recovered/` and `logs/experiment_log.jsonl` are
   not touched either. The canonical locations are resolved **when a run
-  starts**, not when the modules are imported, so the dashboard tests can
+  starts**, not when the modules are imported, so the workbench API tests can
   redirect the application into a temporary workspace.
 * `tests/test_isolation.py` is the regression test for this: it fingerprints
   the real originals (including the baseline manifest), the experiment, the
-  recovery and the log files, drives a full dashboard carve run and asserts
+  recovery and the log files, drives a full isolated carve run and asserts
   that not a single byte of the real project state changed.
 
 The paths that are *derived* from a directory follow it: redirecting
@@ -348,27 +367,14 @@ deactivate
    * Filters by event type and by actor, a distribution chart and the full event
      table with the raw payload. The log itself can be downloaded as JSON Lines.
 
-### 5.1 The look of the dashboard
+### 5.1 The Forensic Workbench
 
-The interface is built from a small set of shared primitives in `app/ui.py`, so every
-page reads as part of the same product:
-
-* **One dark theme.** `.streamlit/config.toml` defines the whole palette: a deep navy
-  canvas, one cyan accent for interactive elements, semantic colours for the evidence
-  states (green = MATCH, red = MISMATCH, orange = MISSING, yellow = UNREGISTERED) and
-  a muted categorical palette for the charts. The primary colour is deliberately
-  mid-dark, so the white label of a primary button keeps a readable contrast.
-* **Cards instead of walls of text.** Every block is a bordered card with a heading
-  (`section()`), every headline number is a bordered metric card (`kpi_row()`), and
-  the evidence states are rendered as coloured badges (`status_badge()`).
-* **Tables that explain themselves.** Data frames are typed with `column_config`:
-  pinned fixture columns, percent and byte formats, checkboxes for boolean states and
-  progress bars for byte coverage. Nothing is shown as an unformatted string.
-* **Icons as a language.** Material symbols mark the pipeline steps, the guardrails,
-  the condition types and the callouts, so a page can be scanned without reading it.
-* **No custom CSS.** The appearance is controlled by the theme file and by native
-  Streamlit elements only, which keeps the dashboard readable in light mode, in
-  print and in a screen reader.
+The local web interface uses a responsive operations layout with a persistent
+evidence navigation rail, workspace status, KPI cards, run-scoped analysis
+tables, and semantic evidence state indicators. Its HTML, CSS and JavaScript
+live in `web/`; `server.py` adapts the UI requests to the established functions
+in `src/`. The byte preview is read-only and only serves fixtures registered
+in the ground-truth manifest.
 
 ---
 
@@ -497,7 +503,7 @@ python -c "import sys; sys.path.insert(0,'.'); from src.hashing import sha256_fi
   JPEG/PDF/ZIP content. Stage 5 must decide how real-but-public sample files (for
   example files published by standard bodies under an open licence) are added, if at
   all.
-* **The signature set is small.** JPEG, PDF and ZIP only. No compound containers
+* **The signature set is small.** JPEG, PNG, GIF, PDF and ZIP only. No compound containers
   (e.g. a DOCX inside a ZIP) and no fragmented-signature handling.
 * **The extent policies are simple.** A candidate ends at the format's terminator, at
   the next signature or at the end of the stream. There is no size-based carving, no

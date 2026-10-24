@@ -1,8 +1,7 @@
 """Tests for import-time package resolution and public API exposure.
 
-These tests ensure that the ``src`` and ``app`` packages resolve to the
-project's own code (not stray modules) and that critical public names are
-importable.
+These tests ensure that the forensic engine and local web entry point expose
+the project's own code and critical public callables.
 """
 
 from __future__ import annotations
@@ -20,16 +19,6 @@ def test_src_package_resolves_to_project() -> None:
         assert name in src.__all__
 
 
-def test_app_package_resolves_to_project() -> None:
-    """``import app`` must resolve to the project's ``app`` package and
-    expose the ``branding`` submodule.
-    """
-    import app
-
-    assert hasattr(app, "__all__")
-    assert "branding" in app.__all__
-
-
 def test_sha256_file_is_importable() -> None:
     """``from src.hashing import sha256_file`` must succeed and return a
     callable.
@@ -39,10 +28,8 @@ def test_sha256_file_is_importable() -> None:
     assert callable(sha256_file)
 
 
-def test_app_name_is_filecarvelab() -> None:
-    """``from app.branding import APP_NAME`` must succeed and return the
-    canonical product name.
-    """
-    from app.branding import APP_NAME
+def test_workbench_entrypoint_is_importable() -> None:
+    """The standard-library workbench server exposes its launcher."""
+    from server import main
 
-    assert APP_NAME == "FileCarveLab"
+    assert callable(main)
