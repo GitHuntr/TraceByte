@@ -81,7 +81,7 @@ def test_the_carved_candidates_are_written_to_the_recovered_folder(
     recovered = workspace.recovered_dir / result.run_id / "exp-contiguous"
     written = sorted(path.name for path in recovered.iterdir())
     assert written
-    assert all(path.endswith((".jpg", ".pdf", ".zip")) for path in written)
+    assert all(path.endswith((".jpg", ".png", ".gif", ".pdf", ".zip")) for path in written)
 
 
 def test_the_carve_report_contains_the_provenance(initialised_workspace) -> None:

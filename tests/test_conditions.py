@@ -22,11 +22,18 @@ from src.conditions import (
     CONDITION_OVERWRITTEN,
     ConditionError,
     build_image,
+    avoid_sequences,
     load_ground_truth,
 )
 from src.hashing import sha256_bytes, sha256_file
 from src.manifest import load_manifest
 from src.signatures import default_registry
+
+
+def test_noise_avoidance_skips_generic_single_byte_trailers() -> None:
+    sequences = avoid_sequences(default_registry())
+    assert b";" not in sequences
+    assert bytes.fromhex("0000000049454E44AE426082") in sequences
 
 
 def _build(workspace, condition: str, **kwargs):

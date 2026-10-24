@@ -173,7 +173,11 @@ def avoid_sequences(registry: SignatureRegistry | None = None) -> tuple[bytes, .
     sequences: list[bytes] = []
     for spec in registry.specs():
         sequences.append(spec.magic)
-        if spec.end_marker:
+        # Single-byte trailers (such as GIF's ``;``) are ordinary filler bytes
+        # and occur so often that forbidding them would make noise generation
+        # effectively impossible. They only delimit a candidate after its magic
+        # has been found, so only meaningful multi-byte markers belong here.
+        if spec.end_marker and len(spec.end_marker) > 1:
             sequences.append(spec.end_marker)
     return tuple(sequences)
 
