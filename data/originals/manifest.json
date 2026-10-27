@@ -4,13 +4,11 @@
   "dataset_name": "FileCarveLab synthetic ground-truth set",
   "dataset_description": "Synthetic, deterministic fixtures used to evaluate file-signature carving accuracy under contiguous, fragmented and partially overwritten conditions. No real-world data is used.",
   "created_utc": "2026-10-21T09:52:31Z",
-  "updated_utc": "2026-10-21T10:39:29Z",
+  "updated_utc": "2026-10-27T11:28:41Z",
   "tool_versions": {
     "python": "3.14.5",
     "python_implementation": "CPython",
     "platform": "Windows-11-10.0.26300-SP0",
-    "streamlit": "1.66.0",
-    "pandas": "3.0.6",
     "pytest": "9.1.1",
     "filecarvelab": "0.1.0"
   },

@@ -1,13 +1,14 @@
 [project]
 name = "tracebyte"
 version = "0.1.0"
-description = "FileCarveLab - File Signature Carving Evaluation (Digital Forensics PBL, DF-PBL-016)"
+description = "TraceByte - Signature Carving Evaluation (Digital Forensics PBL, DF-PBL-016)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+docs = ["reportlab>=4.2"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"

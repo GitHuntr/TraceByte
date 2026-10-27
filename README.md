@@ -1,16 +1,19 @@
-# TraceByte | FileCarveLab
+# TraceByte — Signature Carving Evaluation
 
-**File Signature Carving Evaluation** — Digital Forensics Project Based Learning
-Project reference: **DF-PBL-016**
+**Assigned project:** Signature Carving Evaluation — Digital Forensics Project Based Learning<br>
+**Project reference:** DF-PBL-016 · **SAP ID:** 500119665
 
-The repository is named **TraceByte**; the research dashboard built on top of it is
-branded **FileCarveLab**. The dashboard is the web interface for the experiment.
+TraceByte is the project and the local forensic workbench. It evaluates a signature
+carver with controlled synthetic experiments and separately supports read-only scans
+of user-selected evidence copies. The synthetic evaluation is the assignment's
+measured experiment; real-evidence scans are exploratory and have no ground-truth
+precision or recall score.
 
 ---
 
 ## 1. What this project does
 
-FileCarveLab measures how accurately a file-signature carving engine recovers files
+TraceByte measures how accurately a file-signature carving engine recovers files
 that are stored under three conditions:
 
 | Condition | Description |
@@ -27,58 +30,59 @@ The project produces three deliverables:
 
 ### Current status
 
-**Stage 2 of 5 is implemented.** Stage 1 provided the foundation: the project
-scaffold, the synthetic dataset, the SHA-256 baseline manifest, the integrity
-verification screen, the provenance log and the automated test suite. Stage 2
-adds the signature scanner, the carving engine, the three controlled storage
-conditions and the measurement layer that turns a carve into numbers.
+**The assigned experiment and workbench are implemented.** The project includes
+the synthetic ground-truth dataset, SHA-256 baseline, integrity checks, isolated
+multi-run experiments, signature scanner and carver, metrics, provenance log, local
+web UI, and an independent real-evidence intake workflow. The final report and
+reproducibility materials are in `reports/`.
 
-| Stage | Scope | Status |
+| Component | Scope | Status |
 | --- | --- | --- |
-| 1 | Scaffold, synthetic dataset, SHA-256 manifest, integrity screen, tests | **Complete** |
-| 2 | Signature scanner and carving engine (3 storage conditions) | **Complete** |
-| 3 | Recovery pipeline, content validation, ground-truth matching | **Complete** (folded into Stage 2) |
-| 4 | Precision / recall measurement and results dashboard | **Complete** (folded into Stage 2) |
-| 5 | Failure analysis, limitations, final report | Not started |
+| Dataset and integrity | Synthetic ground truth, baseline hashes, and checks | **Complete** |
+| Carving experiment | Signature scan, recovery, and three storage conditions | **Complete** |
+| Evaluation and reporting | Metrics, failure analysis, limitations, report, and viva guide | **Complete** |
+| Workbench | Local UI, real evidence intake, provenance log | **Complete** |
 
 > **Nothing in this repository fabricates a metric.** Every number on the
 > **Results** page is computed from the ground-truth map that was written
 > *before* carving and from the baseline manifest. The carver never sees the
 > ground truth; the measurement layer never guesses.
 
-### Measured results (Stage 2)
+### Measured results (saved run)
 
-The table below is produced by `src.experiments.run_all_conditions()` on the
-committed dataset. It is reproduced by pressing **Run carving experiments** on
-the **Carve** page.
+The following values are read from the saved run
+`run-20261027T141506Z-489d1acf`, created 2026-10-27 14:15 UTC. The run contains
+its own `run.json`, ground-truth maps, carve outputs, and `metrics.json` files.
+New runs may differ if project code or the baseline changes.
 
-| Condition | Detection P / R | Validated recoveries | Mean byte coverage | Data completeness |
+| Condition | Detection P / R / F1 | Exact SHA-256 matches | Mean byte coverage | Data completeness |
 | --- | --- | --- | --- | --- |
-| Contiguous | 0.78 / 1.00 | 3 of 8 files | 100 % | 100 % |
-| Fragmented | 0.78 / 1.00 | 0 of 8 files | 34 % | 100 % |
-| Partially overwritten | 0.78 / 1.00 | 0 of 8 files | 75 % | 75 % |
+| Contiguous | 0.7778 / 1.0000 / 0.8750 | 3 of 8 files | 100.00 % | 100.00 % |
+| Fragmented | 0.7778 / 1.0000 / 0.8750 | 0 of 8 files | 33.64 % | 100.00 % |
+| Partially overwritten | 0.7778 / 1.0000 / 0.8750 | 0 of 8 files | 75.15 % | 75.02 % |
 
 Reading the table:
 
-* **Detection recall is 1.00 in every condition.** Every signature that the
-  ground truth places in an image is found, including the JPEG header embedded
-  at offset 1024 inside `synthetic_container_01.bin`.
-* **Detection precision is 0.78** because two decoy signatures are planted in
-  the filler of every image on purpose. The filler itself contains no
-  signature at all, so the false positives are designed, not accidental.
-* **Only three files are ever recovered byte for byte.** Those are the three
+* **Detection recall is 1.00 over the seven ground-truth signature instances**
+  in each condition. The embedded JPEG signature is detected, but is not counted
+  as a top-level file recovery.
+* **Detection precision is 0.7778 (7 TP, 2 FP) in this run.** The two false
+  positives are the two planted decoy signatures with no ground-truth file
+  starting at their offsets. The filler is checked for accidental signatures.
+  This controlled result is not a real-world false-positive rate.
+* **Three of eight ground-truth files match their baseline SHA-256** in the
+  contiguous condition. Those are the three
   fixtures that carry their own terminator (`FFD9`, `%%EOF`, `PK 05 06`). The
-  five Stage 1 fixtures start with a real signature but contain no terminator,
+  five fixtures start with a signature but contain no terminator,
   so a carving engine can detect them but cannot delimit them — the carve
   either runs into the next file (**over-carving**) or stops at the end of the
-  stream (**truncation**). This is the central finding of Stage 2.
+  stream (**truncation**). This is the central experimental finding.
 * **Fragmentation destroys recovery.** All data is still present
   (completeness 100 %), but the bytes are no longer contiguous, so the
   signature-delimited extent no longer matches the original and only about a
   third of the bytes survive a naive byte-by-byte comparison.
-* **Overwriting destroys recovery and shows up in the completeness measure.**
-  25 % of every original was replaced, so completeness drops to 75 % and the
-  mean byte coverage drops to the same value.
+* **Overwriting reduces byte availability.** In this run data completeness is
+  75.02 % and mean byte coverage is 75.15 %. These measures are close but distinct.
 
 ---
 
@@ -145,11 +149,11 @@ TraceByte/
 │   ├── integrity.py        # Verification, mismatch/missing/unregistered detection
 │   ├── experiment_log.py   # Append-only JSON Lines provenance log
 │   ├── evidence.py         # Local import, hashing, and real-evidence scan records
-│   ├── signatures.py       # Stage 2: signature registry, scanner, extent policies
-│   ├── conditions.py       # Stage 2: the three controlled storage conditions
-│   ├── carver.py           # Stage 2: the carving engine and its provenance
-│   ├── metrics.py          # Stage 2: detection / recovery / validation scoring
-│   └── experiments.py      # Stage 2: build -> carve -> measure -> log
+│   ├── signatures.py       # Signature registry, scanner, extent policies
+│   ├── conditions.py       # Three controlled storage conditions
+│   ├── carver.py           # Carving engine and per-candidate provenance
+│   ├── metrics.py          # Detection / recovery / validation scoring
+│   └── experiments.py      # Build -> carve -> measure -> log
 ├── data/
 │   ├── originals/          # Ground truth: fixtures + manifest.json  (tracked)
 │   ├── experiments/        # Experimental inputs + measurements       (ignored)
@@ -283,14 +287,23 @@ python -m pytest tests/test_integrity.py -v
 python -m pytest --collect-only -q  # list the tests without running them
 ```
 
-**Verified result.** During Phase 1.3 the automated suite was expanded with
-regression tests covering run isolation, safe run manifests, path-traversal
-rejection, legacy compatibility, status tracking, and the workbench HTTP API:
-**165 tests collected, 165 passed, 0 failed, 0 skipped** (2026-10-24). The audit
-confirmed that the eight original fixtures and the baseline manifest were
-byte-identical before and after the run.
+**Verified 2026-10-27.** The current suite contains **170 tests** covering the
+engine, isolation, integrity, evidence intake, and workbench API behavior. The
+suite completed with **170 passed, 0 failed** using
+`python -m pytest -q -p no:cacheprovider`.
 
-### 4.6 What the tests do *not* touch
+### 4.6 Build the assignment report PDF (optional)
+
+The Markdown report is the editable source. To regenerate its PDF:
+
+```powershell
+python -m pip install "reportlab>=4.2"
+python scripts/build_submission_pdf.py
+```
+
+The PDF is written to `output/pdf/TraceByte_Final_Report.pdf`.
+
+### 4.7 What the tests do *not* touch
 
 The test suite never writes to the project itself:
 
@@ -314,7 +327,7 @@ sandbox.
 
 Run the suite as often as you like - the project directory stays untouched.
 
-### 4.7 Deactivate the environment (when finished)
+### 4.8 Deactivate the environment (when finished)
 
 ```powershell
 deactivate
@@ -345,7 +358,7 @@ deactivate
      directory, flips a single byte in the *copy* and re-runs the verification. The
      original is never modified. This demonstrates that a modified copy is detected
      as changed.
-4. **Carve** → the Stage 2 engine.
+4. **Carving lab** → the synthetic evaluation engine.
    * Lists the supported signatures (magic bytes, extension, end marker and the
      validation strategy that is applied to each of them).
    * **Run carving experiments** builds the three images, carves them, measures the
@@ -363,7 +376,7 @@ deactivate
      positives. The comparison can be downloaded as CSV.
    * The **Run** selector switches between the runs that are still on disk. Only the
      artefacts of the selected run are shown.
-6. **Experiment log** — the append-only provenance record, newest first.
+6. **Activity log** — the append-only provenance record, newest first.
    * Filters by event type and by actor, a distribution chart and the full event
      table with the raw payload. The log itself can be downloaded as JSON Lines.
 
@@ -395,10 +408,10 @@ The byte content is derived from a SHA-256 counter-mode expansion of a fixed see
 it is identical on every platform and every Python version: regenerating the dataset
 reproduces the same hashes.
 
-The first five fixtures carry a **start** signature but no **terminator**, so a
-carving engine can detect them but cannot delimit them. The last three were added in
-Stage 2 and end with the terminator of their format, which is what makes a
-byte-exact recovery possible in the contiguous condition. They are the difference
+Three fixtures carry a **start** signature but no **terminator**, so a
+carving engine can detect them but cannot delimit them. The last three carry an
+end marker for their format, which can make a byte-exact recovery possible in the
+contiguous condition. They are the difference
 between "the signature was found" and "the file was recovered".
 
 Two fixtures act as **negative controls**: `synthetic_blob_01.bin` has no signature
@@ -495,38 +508,36 @@ python -c "import sys; sys.path.insert(0,'.'); from src.hashing import sha256_fi
 
 ---
 
-## 9. Known limitations after Stage 2
+## 9. Limitations
 
 * **The fixtures are not real files.** They carry realistic signatures and, for the
   three `synthetic_len_*` fixtures, a realistic terminator, but no valid structure.
-  They are measured against as *signature-shaped placeholders*, not against genuine
-  JPEG/PDF/ZIP content. Stage 5 must decide how real-but-public sample files (for
-  example files published by standard bodies under an open licence) are added, if at
-  all.
-* **The signature set is small.** JPEG, PNG, GIF, PDF and ZIP only. No compound containers
-  (e.g. a DOCX inside a ZIP) and no fragmented-signature handling.
+  They are measured as *signature-shaped placeholders*, not genuine JPEG/PDF/ZIP
+  content. Real, openly licensed test files with independent parser validation
+  could expand evaluation beyond signature-shaped fixtures.
+* **Synthetic evaluation formats are JPEG, PDF and ZIP.** Real-evidence scans
+  recognize JPEG, PNG, GIF, PDF and ZIP. No compound containers (e.g. DOCX inside
+  ZIP) or fragmented-file reassembly are implemented.
 * **The extent policies are simple.** A candidate ends at the format's terminator, at
   the next signature or at the end of the stream. There is no size-based carving, no
   carving from the end of the file backwards and no format-aware header repair.
 * **Byte coverage is a naive measure.** It assumes that the file's bytes follow the
   signature contiguously. Under fragmentation that assumption is wrong by
   construction, so the coverage figure is a lower bound, not a recovery rate.
-* **The false positives are designed, not observed.** Two decoy signatures are planted
-  in the filler of every image so that the false-positive count is reproducible. Real
-  false positives come from chance coincidences in unallocated space, and the filler
-  is deliberately kept free of signatures to keep the experiment under control.
+* **False positives depend on the test image.** Interpret each result using its
+  saved ground-truth map and candidate list. Synthetic filler behavior is not a
+  population estimate of false positives on real media.
 * **Baseline re-baselining is a library API only.** `rebaseline_entry()` is tested but
   deliberately not exposed in the dashboard, to keep the operator from changing a
   baseline by accident.
 * **The experiment log is append-only but not tamper-evident.** It is a plain JSON
-  Lines file. A cryptographic chain over the log entries is planned as part of the
-  reproducibility checks in Stage 5.
+  Lines file and is not digitally signed or hash chained.
 * **The manifest is not signed.** The baseline is trusted because it lives in version
   control; a detached signature over `manifest.json` is a candidate improvement.
 * **Every run keeps its artefacts.** Because nothing is ever deleted,
   `data/experiments/` and `data/recovered/` grow with every run. A retention policy
   (keep the last *n* runs, or a run that the operator explicitly prunes) is a
-  candidate for Stage 5.
+  possible future improvement.
 
 ---
 
@@ -555,11 +566,12 @@ python -c "import sys; sys.path.insert(0,'.'); from src.hashing import sha256_fi
       baseline manifest or the real provenance log
 * [x] One directory per experiment run, so that runs cannot overwrite each other
       and no artefact is ever deleted
-* [ ] Failure analysis and final report (Stage 5)
+* [x] Failure analysis, limitations, reproducibility notes and final report
 
 ---
 
 ## 11. Licence and attribution
 
-Coursework project for the Digital Forensics PBL (DF-PBL-016). All data produced by
-this repository is synthetic and generated by the code in `src/`.
+Coursework project for Digital Forensics PBL, DF-PBL-016 (SAP ID 500119665).
+Synthetic evaluation fixtures are generated by the code in `src/`; imported real
+evidence is user-provided and is stored and reported separately.
