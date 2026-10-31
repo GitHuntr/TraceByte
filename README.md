@@ -1,13 +1,36 @@
 # TraceByte — Signature Carving Evaluation
 
-**Assigned project:** Signature Carving Evaluation — Digital Forensics Project Based Learning<br>
-**Project reference:** DF-PBL-016 · **SAP ID:** 500119665
+![Tests](https://img.shields.io/badge/tests-170%20passing-brightgreen)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
+![Domain](https://img.shields.io/badge/domain-Digital%20Forensics-blueviolet)
 
-TraceByte is the project and the local forensic workbench. It evaluates a signature
-carver with controlled synthetic experiments and separately supports read-only scans
-of user-selected evidence copies. The synthetic evaluation is the assignment's
-measured experiment; real-evidence scans are exploratory and have no ground-truth
-precision or recall score.
+TraceByte is a forensic evaluation workbench for file-signature carving. It measures
+how accurately a carving engine recovers files under three controlled storage
+conditions — contiguous, fragmented, and partially overwritten — using a reproducible
+synthetic dataset with cryptographic ground-truth tracking. It also supports
+read-only scans of user-supplied evidence copies through a local web interface.
+
+## ⚡ Quickstart
+
+```powershell
+# 1 — Clone and enter the repo
+git clone https://github.com/your-username/TraceByte.git
+cd TraceByte
+
+# 2 — Create the virtual environment and install dev dependencies
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+# 3 — Launch the workbench
+python app.py          # opens at http://127.0.0.1:8510
+```
+
+Run the full test suite (170 tests, ~32 s):
+```powershell
+python -m pytest -q
+```
 
 ---
 

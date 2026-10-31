@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# TraceByte / FileCarveLab - Digital Forensics PBL (DF-PBL-016)
+# TraceByte — Signature Carving Evaluation Workbench
 # ---------------------------------------------------------------------------
 
 # Python
@@ -22,6 +22,9 @@ ENV/
 .ruff_cache/
 .coverage
 htmlcov/
+
+# Pytest scratch output files dropped in the project root
+.pytest-output-*.txt
 
 # Editor / OS noise
 .vscode/
