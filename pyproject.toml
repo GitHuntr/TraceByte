@@ -1,7 +1,7 @@
 [project]
 name = "tracebyte"
 version = "0.1.0"
-description = "TraceByte - Signature Carving Evaluation (Digital Forensics PBL, DF-PBL-016)"
+description = "TraceByte - Digital Forensic Signature Carving Evaluation Workbench"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
